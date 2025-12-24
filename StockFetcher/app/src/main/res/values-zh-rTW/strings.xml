@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">抓股神器</string>
+
+    <string name="view_mode_all">全部</string>
+    <string name="view_mode_k">K線</string>
+    <string name="view_mode_vo">成交量</string>
+    <string name="view_mode_vp">量價圖</string>
+
+    <string name="indicator_macd">MACD</string>
+    <string name="indicator_rsi">RSI</string>
+    <string name="indicator_dmi">DMI</string>
+
+    <string name="hint_stock_id">股票代碼</string>
+    <string name="hint_start_date">起始日期</string>
+    <string name="hint_compare_symbol">對比代號</string>
+
+    <string name="interval_day">日線</string>
+    <string name="interval_week">周線</string>
+    <string name="interval_month">月線</string>
+    <string name="interval_hour">時線</string>
+
+    <string name="toast_loading">載入 %1$s / %2$s 的 %3$s 數據</string>
+    <string name="error_load_failed">載入失敗：%1$s</string>
+     <string name="toast_loading_comparison">主代號: %1$s。正在載入對比代號 %2$s</string>
+
+    <string-array name="interval_display_text">
+        <item>@string/interval_day</item>
+        <item>@string/interval_week</item>
+        <item>@string/interval_month</item>
+        <item>@string/interval_hour</item>
+    </string-array>
+</resources>

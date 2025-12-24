@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stock Fetcher</string>
+
+    <string name="view_mode_all">ALL</string>
+    <string name="view_mode_k">Candle</string>
+    <string name="view_mode_vo">Vo</string>
+    <string name="view_mode_vp">VP</string>
+
+    <string name="indicator_macd">MACD</string>
+    <string name="indicator_rsi">RSI</string>
+    <string name="indicator_dmi">DMI</string>
+
+    <string name="hint_stock_id">Ticker</string>
+    <string name="hint_start_date">Start date</string>
+    <string name="hint_compare_symbol">Compare</string>
+
+    <string name="interval_day">Daily</string>
+    <string name="interval_week">Weekly</string>
+    <string name="interval_month">Monthly</string>
+    <string name="interval_hour">Hourly</string>
+
+    "載入 %s/%s 的 %s 數據..."
+    <string name="toast_loading">Loading %1$s / %2$s %3$s data</string>
+    <string name="error_load_failed">Load failed: %1$s</string>
+    <string name="toast_loading_comparison">Main: %1$s。loading comparison %2$s</string>
+
+    <string-array name="interval_display_text">
+            <item>@string/interval_day</item>
+            <item>@string/interval_week</item>
+            <item>@string/interval_month</item>
+            <item>@string/interval_hour</item>
+        </string-array>
+</resources>

@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity"
+    android:fitsSystemWindows="true"
+    android:importantForAutofill="noExcludeDescendants"
+    tools:targetApi="o">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:background="@android:color/black">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="5"
+            android:layout_marginTop="0dp">
+
+            <com.github.mikephil.charting.charts.CombinedChart
+                android:id="@+id/mainChart"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <com.example.stockfetcher.VolumeProfileView
+                android:id="@+id/vpView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@android:color/transparent"
+                app:layout_constraintTop_toTopOf="@id/mainChart"
+                app:layout_constraintBottom_toBottomOf="@id/mainChart"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toEndOf="@id/mainChart" />
+
+            <Button
+                android:id="@+id/viewModeButton"
+                android:layout_width="60dp"
+                android:layout_height="36dp"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="0dp"
+                android:layout_marginEnd="0dp"
+                android:text="@string/view_mode_all"
+                android:background="#80444444"
+                android:textColor="@android:color/white"
+                android:textSize="10sp"
+                android:padding="0dp" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="2"
+            android:layout_marginTop="-10dp">
+
+            <com.github.mikephil.charting.charts.CombinedChart
+                android:id="@+id/k_kdChart"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <EditText
+                android:id="@+id/comparisonStockIdEditText"
+                android:layout_width="60dp"
+                android:layout_height="32dp"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="10dp"
+                android:background="#80444444"
+                android:importantForAutofill="no"
+                android:autofillHints=""
+                android:hint="@string/hint_compare_symbol"
+                android:textColorHint="@android:color/darker_gray"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:paddingStart="5dp"
+                android:singleLine="true"
+                android:imeOptions="actionDone" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="2"
+            android:layout_marginTop="-10dp">
+
+            <com.github.mikephil.charting.charts.CombinedChart
+                android:id="@+id/indicatorChart"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <Button
+                android:id="@+id/indicatorModeButton"
+                android:layout_width="60dp"
+                android:layout_height="36dp"
+                android:layout_gravity="bottom|end"
+                android:layout_marginTop="20dp"
+                android:layout_marginEnd="0dp"
+                android:text="@string/indicator_macd"
+                android:background="#80444444"
+                android:textColor="@android:color/white"
+                android:textSize="10sp"
+                android:padding="0dp" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/stockIdEditText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.2"
+                android:importantForAutofill="no"
+                android:autofillHints=""
+                android:hint="@string/hint_stock_id"
+                android:inputType="text"
+                android:imeOptions="actionDone"
+                android:singleLine="true"
+                android:textColor="@android:color/white"
+                android:textColorHint="@android:color/darker_gray" />
+
+            <EditText
+                android:id="@+id/startDateEditText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.5"
+                android:hint="@string/hint_start_date"
+                android:inputType="date"
+                android:imeOptions="actionDone"
+                android:importantForAutofill="no"
+                android:autofillHints=""
+                android:singleLine="true"
+                android:drawableEnd="@android:drawable/ic_menu_my_calendar"
+                android:layout_marginStart="8dp"
+                android:textColor="@android:color/white"
+                android:textColorHint="@android:color/darker_gray" />
+
+            <Button
+                android:id="@+id/intervalSwitchButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.0"
+                android:layout_marginStart="8dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingLeft="4dp"
+                android:paddingRight="4dp"
+                android:text="@string/interval_day" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
