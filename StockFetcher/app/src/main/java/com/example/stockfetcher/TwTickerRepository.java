@@ -49,6 +49,7 @@ public final class TwTickerRepository {
     }
 
     private TwTickerRepository() {}
+    // 從股票清單 cache 讀到的 meta（ticker -> info）
 
     /** 對齊 Python：先讀檔；失敗才爬取；成功後寫回 CSV（含 Name/Industry） */
     public static List<TickerInfo> loadOrScrape(Context ctx) {
@@ -77,7 +78,7 @@ public final class TwTickerRepository {
     // -----------------------
     private static List<TickerInfo> readCache(Context ctx) {
         try {
-            File f = new File(ctx.getFilesDir(), CACHE_FILE);
+            File f = new File(ctx.getExternalFilesDir(null), CACHE_FILE);
             if (!f.exists()) return null;
 
             // 對齊 Python：可能是 utf-8-sig（有 BOM）
@@ -130,7 +131,7 @@ public final class TwTickerRepository {
 
     private static void writeCache(Context ctx, List<TickerInfo> list) {
         try {
-            File f = new File(ctx.getFilesDir(), CACHE_FILE);
+            File f = new File(ctx.getExternalFilesDir(null), CACHE_FILE);
             try (FileWriter fw = new FileWriter(f, false)) {
                 // 對齊 Python：輸出欄位含 Name/Industry
                 fw.write("Ticker,Name,Industry\n");

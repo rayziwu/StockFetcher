@@ -134,6 +134,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private final int NUM_PRICE_BUCKETS = 76;
 
     private CoordinateMarkerView coordinateMarker;
+    // 從股票清單 cache 讀到的 meta（ticker -> info）
+    private final Map<String, TickerInfo> tickerMetaMap = new HashMap<>();
+    private static final String TICKERS_CACHE_FILE = "股票代碼.csv";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -411,6 +414,106 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             Log.e(TAG, "CSV read failed: " + e.getMessage());
         }
         return out;
+    }
+    private String buildMainStockLegendLabel() {
+        String t = (currentStockId == null) ? "" : currentStockId.trim().toUpperCase(Locale.US);
+        if (t.isEmpty()) return "||";
+
+        // 1) 先看記憶體快取
+        TickerInfo info = tickerMetaMap.get(t);
+
+        // 2) 沒有就嘗試從內部檔案 /data/data/.../files/股票代碼.csv 讀一次（不觸發網路）
+        if (info == null) {
+            info = findTickerInfoFromInternalCache(t);
+            if (info != null) tickerMetaMap.put(t, info);
+        }
+
+        // 3) 還找不到就用 screenerResults 當 fallback（若該 ticker 剛好來自篩選結果）
+        String name = "";
+        String ind = "";
+        if (info != null) {
+            name = (info.name == null) ? "" : info.name.trim();
+            ind  = (info.industry == null) ? "" : info.industry.trim();
+        } else {
+            for (ScreenerResult r : screenerResults) {
+                if (r == null || r.ticker == null) continue;
+                if (t.equals(r.ticker.trim().toUpperCase(Locale.US))) {
+                    name = (r.name == null) ? "" : r.name.trim();
+                    ind  = (r.industry == null) ? "" : r.industry.trim();
+                    break;
+                }
+            }
+        }
+
+        return t + "|" + name + "|" + ind;
+    }
+
+    @androidx.annotation.Nullable
+    private TickerInfo findTickerInfoFromInternalCache(String tickerUpper) {
+        try {
+            java.io.File f = new java.io.File(getFilesDir(), TICKERS_CACHE_FILE);
+            if (!f.exists()) return null;
+
+            try (java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8))) {
+
+                String header = br.readLine();
+                if (header == null) return null;
+                if (header.startsWith("\uFEFF")) header = header.substring(1);
+
+                String[] h = splitCsvLine(header);
+                int iTicker = -1, iName = -1, iInd = -1;
+                for (int i = 0; i < h.length; i++) {
+                    String col = h[i].trim().toLowerCase(Locale.US);
+                    if (col.equals("ticker")) iTicker = i;
+                    else if (col.equals("name")) iName = i;
+                    else if (col.equals("industry") || col.equals("category")) iInd = i;
+                }
+
+                String line;
+                while ((line = br.readLine()) != null) {
+                    String[] cols = splitCsvLine(line);
+                    String tk = (iTicker >= 0 && iTicker < cols.length) ? cols[iTicker].trim() :
+                            (cols.length > 0 ? cols[0].trim() : "");
+                    if (tk.isEmpty()) continue;
+
+                    String tkU = tk.toUpperCase(Locale.US);
+                    if (!tkU.equals(tickerUpper)) continue;
+
+                    String name = (iName >= 0 && iName < cols.length) ? cols[iName].trim() : "";
+                    String ind  = (iInd >= 0 && iInd < cols.length) ? cols[iInd].trim() : "";
+                    return new TickerInfo(tkU, name, ind);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** 簡易 CSV split（支援引號） */
+    private static String[] splitCsvLine(String line) {
+        java.util.ArrayList<String> out = new java.util.ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        boolean inQ = false;
+
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (c == '\"') {
+                if (inQ && i + 1 < line.length() && line.charAt(i + 1) == '\"') {
+                    cur.append('\"');
+                    i++;
+                } else {
+                    inQ = !inQ;
+                }
+            } else if (c == ',' && !inQ) {
+                out.add(cur.toString());
+                cur.setLength(0);
+            } else {
+                cur.append(c);
+            }
+        }
+        out.add(cur.toString());
+        return out.toArray(new String[0]);
     }
     private void exportScreenerResultsToCsv() {
         if (screenerResults.isEmpty()) {
@@ -1665,23 +1768,45 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         Legend legend = mainChart.getLegend();
         List<LegendEntry> customEntries = new ArrayList<>();
 
-        if ((mode.equals("ALL") || mode.equals("K"))
-                && data.getCandleData() != null && data.getCandleData().getDataSetCount() > 0) {
-            customEntries.add(new LegendEntry(
-                    currentStockId,
-                    Legend.LegendForm.SQUARE, 10f, 5f, null,
-                    data.getCandleData().getDataSetByIndex(0).getIncreasingColor()
-            ));
-        }
-
+// 只在主圖有畫 K/MA 時才顯示（你原本就是這樣）
         if ((mode.equals("ALL") || mode.equals("K")) && data.getLineData() != null) {
-            for (ILineDataSet set : data.getLineData().getDataSets()) {
-                if (set.isVisible() && set.getForm() != Legend.LegendForm.NONE) {
-                    customEntries.add(new LegendEntry(
-                            set.getLabel(), Legend.LegendForm.LINE, 2f, 5f, null, set.getColor()
-                    ));
-                }
+
+            // 取出「目前真的畫在主圖上的兩條 MA 線」的 dataset（依你現況就是兩條）
+            List<ILineDataSet> sets = data.getLineData().getDataSets();
+            ILineDataSet ma1 = (sets.size() >= 1) ? sets.get(0) : null;
+            ILineDataSet ma2 = (sets.size() >= 2) ? sets.get(1) : null;
+
+            // 1) MA數字1
+            if (ma1 != null) {
+                customEntries.add(new LegendEntry(
+                        ma1.getLabel(),
+                        Legend.LegendForm.LINE, 10f, 3f, null,
+                        ma1.getColor()
+                ));
             }
+
+            // 2) MA數字2
+            if (ma2 != null) {
+                customEntries.add(new LegendEntry(
+                        ma2.getLabel(),
+                        Legend.LegendForm.LINE, 10f, 3f, null,
+                        ma2.getColor()
+                ));
+            }
+
+            // 3) 主要股票代碼|股票名稱|產業別
+            int stockColor = Color.RED;
+            if (data.getCandleData() != null && data.getCandleData().getDataSetCount() > 0) {
+                try {
+                    stockColor = data.getCandleData().getDataSetByIndex(0).getIncreasingColor();
+                } catch (Exception ignored) {}
+            }
+
+            customEntries.add(new LegendEntry(
+                    buildMainStockLegendLabel(),
+                    Legend.LegendForm.SQUARE, 10f, 5f, null,
+                    stockColor
+            ));
         }
 
         legend.setCustom(customEntries);
