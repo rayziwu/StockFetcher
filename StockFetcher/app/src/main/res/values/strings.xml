@@ -49,10 +49,10 @@
     <string name="toast_screener_none">Done: %1$s, no matches</string>
 
     <string name="dialog_screener_done_title">Screening completed</string>
-    <string name="dialog_screener_done_msg">Condition: %1$s\nMatches: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\nSwipe up: end this screening (ask to export once)</string>
+    <string name="dialog_screener_done_msg">Condition: %1$s\nMatches: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\n</string>
 
     <string name="dialog_csv_loaded_title">Stock list loaded</string>
-    <string name="dialog_csv_loaded_msg">File: %1$s\nCount: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\n\n(No export prompt in this mode)</string>
+    <string name="dialog_csv_loaded_msg">File: %1$s\nCount: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\n</string>
 
     <string name="dialog_export_title">Export</string>
     <string name="dialog_export_msg">Export the screening result to a CSV file?</string>
