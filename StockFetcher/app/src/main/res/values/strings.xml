@@ -3,7 +3,7 @@
     <string name="app_name">Stock Fetcher</string>
 
     <string name="view_mode_all">ALL</string>
-    <string name="view_mode_k">Candle</string>
+    <string name="view_mode_k">Candles</string>
     <string name="view_mode_vo">Volume</string>
     <string name="view_mode_vp">VP</string>
 
@@ -21,7 +21,9 @@
     <string name="interval_hour">Hourly</string>
 
     <string name="toast_loading">Loading %1$s / %2$s %3$s data</string>
-    <string name="error_load_failed">Load failed: %1$s</string>
+    <string name="error_load_failed">Load failed: %1$s%2$s</string>
+    <string name="error_detail_wrap"> (%1$s)</string>
+
     <string name="toast_loading_comparison">Main: %1$s. Loading comparison: %2$s</string>
 
     <string-array name="interval_display_text">
@@ -49,10 +51,10 @@
     <string name="toast_screener_none">Done: %1$s, no matches</string>
 
     <string name="dialog_screener_done_title">Screening completed</string>
-    <string name="dialog_screener_done_msg">Condition: %1$s\nMatches: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\n</string>
+    <string name="dialog_screener_done_msg">Condition: %1$s\nMatches: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous</string>
 
     <string name="dialog_csv_loaded_title">Stock list loaded</string>
-    <string name="dialog_csv_loaded_msg">File: %1$s\nCount: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\n</string>
+    <string name="dialog_csv_loaded_msg">File: %1$s\nCount: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous</string>
 
     <string name="dialog_export_title">Export</string>
     <string name="dialog_export_msg">Export the screening result to a CSV file?</string>

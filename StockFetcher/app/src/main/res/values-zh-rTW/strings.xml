@@ -21,7 +21,9 @@
     <string name="interval_hour">時線</string>
 
     <string name="toast_loading">載入 %1$s / %2$s 的 %3$s 數據</string>
-    <string name="error_load_failed">載入失敗：%1$s</string>
+    <string name="error_load_failed">載入失敗：%1$s%2$s</string>
+    <string name="error_detail_wrap">（%1$s）</string>
+
     <string name="toast_loading_comparison">主代號：%1$s。正在載入對比代號：%2$s</string>
 
     <string-array name="interval_display_text">
@@ -49,10 +51,10 @@
     <string name="toast_screener_none">完成：%1$s，沒有符合</string>
 
     <string name="dialog_screener_done_title">篩選完成</string>
-    <string name="dialog_screener_done_msg">條件：%1$s\n筆數：%2$d\n\n操作：\n向右滑：下一檔\n向左滑：上一檔\n</string>
+    <string name="dialog_screener_done_msg">條件：%1$s\n筆數：%2$d\n\n操作：\n向右滑：下一檔\n向左滑：上一檔</string>
 
     <string name="dialog_csv_loaded_title">已載入股票清單</string>
-    <string name="dialog_csv_loaded_msg">檔案：%1$s\n共 %2$d 檔\n\n操作：\n向右滑：下一檔\n向左滑：上一檔\n</string>
+    <string name="dialog_csv_loaded_msg">檔案：%1$s\n共 %2$d 檔\n\n操作：\n向右滑：下一檔\n向左滑：上一檔</string>
 
     <string name="dialog_export_title">存檔</string>
     <string name="dialog_export_msg">是否要將本次篩選結果存成 CSV？</string>

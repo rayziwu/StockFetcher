@@ -1143,7 +1143,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             if (!errorMessages.isEmpty()) {
                 String fullErrorMsg = String.join("\n", errorMessages);
                 Toast.makeText(MainActivity.this,
-                        getString(R.string.error_load_failed, fullErrorMsg),
+                        getString(R.string.error_load_failed, fullErrorMsg,""),
                         Toast.LENGTH_LONG).show();
                 Log.w(TAG, "對比指數載入失敗，但主股成功。繼續繪製。");
             }
@@ -1215,13 +1215,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             String fullErrorMsg = String.join("\n", errorMessages);
 
             if (fullPriceList.isEmpty()) {
-                clearAllCharts(getString(R.string.error_load_failed, fullErrorMsg));
+                clearAllCharts(getString(R.string.error_load_failed, fullErrorMsg,""));
                 return;
             }
 
             if (!errorMessages.isEmpty()) {
                 Toast.makeText(MainActivity.this,
-                        getString(R.string.error_load_failed, fullErrorMsg),
+                        getString(R.string.error_load_failed, fullErrorMsg, ""),
                         Toast.LENGTH_LONG).show();
                 Log.w(TAG, "對比指數載入失敗，但主股成功。繼續繪製。");
             }
