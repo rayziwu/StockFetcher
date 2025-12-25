@@ -4,7 +4,7 @@
 
     <string name="view_mode_all">ALL</string>
     <string name="view_mode_k">Candle</string>
-    <string name="view_mode_vo">Vo</string>
+    <string name="view_mode_vo">Volume</string>
     <string name="view_mode_vp">VP</string>
 
     <string name="indicator_macd">MACD</string>
@@ -20,15 +20,60 @@
     <string name="interval_month">Monthly</string>
     <string name="interval_hour">Hourly</string>
 
-    "載入 %s/%s 的 %s 數據..."
     <string name="toast_loading">Loading %1$s / %2$s %3$s data</string>
     <string name="error_load_failed">Load failed: %1$s</string>
-    <string name="toast_loading_comparison">Main: %1$s。loading comparison %2$s</string>
+    <string name="toast_loading_comparison">Main: %1$s. Loading comparison: %2$s</string>
 
     <string-array name="interval_display_text">
-            <item>@string/interval_day</item>
-            <item>@string/interval_week</item>
-            <item>@string/interval_month</item>
-            <item>@string/interval_hour</item>
-        </string-array>
+        <item>@string/interval_day</item>
+        <item>@string/interval_week</item>
+        <item>@string/interval_month</item>
+        <item>@string/interval_hour</item>
+    </string-array>
+
+    <string name="screener_btn">Screen</string>
+    <string name="screener_title">Select screening condition</string>
+
+    <string name="screener_mode_lt20">1. KD40 &lt; 20 for the last 40 trading days + volume spike</string>
+    <string name="screener_mode_gt45">2. Consecutive KD40 &gt; 45 days: 21~29 + volume spike</string>
+    <string name="screener_mode_ma60_3pct" formatted="false">3. Close within ±3% of MA60 for the last 40 trading days</string>
+    <string name="screener_mode_kd9_mo_gc">4. Monthly KD9 golden cross</string>
+    <string name="screener_mode_kd9_wk_gc">5. Weekly KD9 golden cross</string>
+    <string name="screener_mode_csv_list">6. Load a stock list from CSV</string>
+
+    <string name="toast_screener_running">Screening is running, please wait</string>
+    <string name="toast_screener_started">Screening started: %1$s</string>
+    <string name="toast_screener_progress">%1$d%%</string>
+    <string name="toast_screener_cancelled">Screening cancelled</string>
+    <string name="toast_screener_done">Done: %1$s, %2$d matches</string>
+    <string name="toast_screener_none">Done: %1$s, no matches</string>
+
+    <string name="dialog_screener_done_title">Screening completed</string>
+    <string name="dialog_screener_done_msg">Condition: %1$s\nMatches: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\nSwipe up: end this screening (ask to export once)</string>
+
+    <string name="dialog_csv_loaded_title">Stock list loaded</string>
+    <string name="dialog_csv_loaded_msg">File: %1$s\nCount: %2$d\n\nGestures:\nSwipe right: next\nSwipe left: previous\n\n(No export prompt in this mode)</string>
+
+    <string name="dialog_export_title">Export</string>
+    <string name="dialog_export_msg">Export the screening result to a CSV file?</string>
+    <string name="btn_yes">Yes</string>
+    <string name="btn_no">No</string>
+
+    <string name="error_ticker_list_empty">Ticker list is empty (load/scrape failed)</string>
+    <string name="error_screen_failed">Screening failed: %1$s</string>
+
+    <!-- CSV / Export -->
+    <string name="screener_pick_csv_title">Pick a CSV file</string>
+    <string name="error_csv_dir_unavailable">CSV directory is unavailable</string>
+    <string name="error_csv_not_found">No CSV files found in %1$s</string>
+    <string name="error_csv_no_tickers">No valid tickers in %1$s</string>
+
+    <string name="toast_export_nothing">Nothing to export</string>
+    <string name="toast_export_done">Exported: %1$s</string>
+    <string name="toast_export_failed">Export failed: %1$s</string>
+
+    <!-- Not currently referenced by MainActivity (some noData texts are hard-coded in Java) -->
+    <string name="nodata_kd_compare">KD panel / Comparison candlestick</string>
+    <string name="nodata_indicator_macd">MACD panel</string>
+    <string name="nodata_no_history">No historical data for %1$s.</string>
 </resources>

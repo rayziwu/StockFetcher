@@ -66,6 +66,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends AppCompatActivity implements OnChartGestureListener {
 
+    // MainActivity fields 新增
+    private Button screenerButton;
+
+    private volatile boolean isScreening = false;
+    private java.util.concurrent.ExecutorService screenerExec =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+    private java.util.concurrent.Future<?> screenerFuture;
+    private final java.util.concurrent.atomic.AtomicBoolean screenerCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    private final List<ScreenerResult> screenerResults = new ArrayList<>();
+    private int screenerIndex = 0;
+    private boolean screenerSessionClosed = true;
+    private boolean allowSaveOnSwipeUp = true;
+    private ScreenerMode screenerMode = ScreenerMode.LT20;
+
+    // 匯出 CSV 用
+    private String pendingExportCsv = null;
     private enum IndicatorMode { MACD, RSI, DMI }
 
     private static final String TAG = "StockFetcherApp";
@@ -145,6 +162,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         k_kdChart = findViewById(R.id.k_kdChart);
         indicatorChart = findViewById(R.id.indicatorChart);
         vpView = findViewById(R.id.vpView);
+        screenerButton = findViewById(R.id.screenerButton);
     }
 
     private void initUi() {
@@ -246,8 +264,368 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
             isSwitchingInterval = false;
         });
+        updateDateInputByInterval(currentInterval);
+        // Screener button
+        if (screenerButton != null) {
+            screenerButton.setText(getString(R.string.screener_btn));
+            screenerButton.setOnClickListener(v -> {
+                if (isScreening) {
+                    // 點擊時提示（或你也可改成直接取消）
+                    Toast.makeText(this, getString(R.string.toast_screener_running), Toast.LENGTH_SHORT).show();
+                } else {
+                    showScreenerModeDialog();
+                }
+            });
+        }
+    }
+    private void setControlsEnabled(boolean enabled) {
+        if (intervalSwitchButton != null) intervalSwitchButton.setEnabled(enabled);
+        if (viewModeButton != null) viewModeButton.setEnabled(enabled);
+        if (indicatorModeButton != null) indicatorModeButton.setEnabled(enabled);
+
+        if (stockIdEditText != null) stockIdEditText.setEnabled(enabled);
+        if (startDateEditText != null) startDateEditText.setEnabled(enabled);
+        if (comparisonStockIdEditText != null) comparisonStockIdEditText.setEnabled(enabled);
+
+        // 篩選按鈕保持可用（用於顯示進度/提示）
+        if (screenerButton != null) screenerButton.setEnabled(true);
+    }
+    private void applyIntervalForScreener(ScreenerMode mode) {
+        if (mode == null) return;
+
+        final String target;
+        switch (mode) {
+            case KD9_MO_GC: target = "1mo"; break;
+            case KD9_WK_GC: target = "1wk"; break;
+            case LT20:
+            case GT45:
+            case MA60_3PCT:
+            default: target = "1d"; break;
+        }
+
+        if (target.equals(currentInterval)) return;
+
+        currentInterval = target;
+        // 同步 index 與按鈕文字
+        for (int i = 0; i < INTERVALS.length; i++) {
+            if (INTERVALS[i].equals(target)) {
+                currentIntervalIndex = i;
+                break;
+            }
+        }
+        if (intervalSwitchButton != null && displayText != null && currentIntervalIndex >= 0
+                && currentIntervalIndex < displayText.length) {
+            intervalSwitchButton.setText(displayText[currentIntervalIndex]);
+        }
+        updateDateInputByInterval(currentInterval);
+    }
+    private void openCsvListPicker() {
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null || !dir.exists()) {
+            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        java.io.File[] files = dir.listFiles((d, name) -> name != null && name.toLowerCase(Locale.US).endsWith(".csv"));
+        if (files == null || files.length == 0) {
+            Toast.makeText(this, getString(R.string.error_csv_not_found, dir.getAbsolutePath()), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        java.util.Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+        CharSequence[] items = new CharSequence[files.length];
+        for (int i = 0; i < files.length; i++) items[i] = files[i].getName();
+
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.screener_pick_csv_title)
+                .setItems(items, (dlg, which) -> {
+                    java.io.File f = files[which];
+                    List<String> tickers = readFirstColumnTickersFromCsv(f);
+                    if (tickers.isEmpty()) {
+                        Toast.makeText(this, getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG).show();
+                        return;
+                    }
+
+                    // 轉成 screenerResults（假設 ScreenerResult 有 public field: ticker）
+                    screenerResults.clear();
+                    for (String t : tickers) {
+                        String tk = (t == null) ? "" : t.trim().toUpperCase(Locale.US);
+                        if (tk.isEmpty()) continue;
+
+                        // CSV list mode：只有 ticker，其它欄位先填空/未知
+                        ScreenerResult r = new ScreenerResult(
+                                tk,            // ticker
+                                "",            // name
+                                "",            // industry
+                                Double.NaN,    // avgClose60 (unknown)
+                                Double.NaN,    // latestClose (unknown)
+                                null,          // lastK
+                                null,          // lastD
+                                null,          // runDays
+                                null,          // ma60
+                                null,          // ma60DiffPct
+                                null           // crossDate
+                        );
+                        screenerResults.add(r);
+                    }
+                    screenerIndex = 0;
+                    screenerSessionClosed = true;      // CSV list 模式不是「篩選 session」
+                    allowSaveOnSwipeUp = false;
+
+                    new androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle(R.string.dialog_csv_loaded_title)
+                            .setMessage(getString(R.string.dialog_csv_loaded_msg, f.getName(), screenerResults.size()))
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+
+                    showFilteredAt(0, true);
+                })
+                .show();
     }
 
+    private List<String> readFirstColumnTickersFromCsv(java.io.File file) {
+        List<String> out = new ArrayList<>();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+
+                // 只取第一欄（簡易 CSV：逗號前）
+                String col0 = line.split(",", -1)[0].trim();
+
+                // 跳過 header
+                if (col0.equalsIgnoreCase("ticker")) continue;
+
+                // 正規化
+                String t = col0.toUpperCase(Locale.US);
+                if (t.isEmpty()) continue;
+                if (seen.add(t)) out.add(t);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "CSV read failed: " + e.getMessage());
+        }
+        return out;
+    }
+    private void exportScreenerResultsToCsv() {
+        if (screenerResults.isEmpty()) {
+            Toast.makeText(this, getString(R.string.toast_export_nothing), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null) {
+            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        String ts = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new java.util.Date());
+        String tag = (screenerMode != null) ? screenerMode.name() : "MODE";
+        String filename = "TW_SCREENER_" + tag + "_" + ts + ".csv";
+        java.io.File outFile = new java.io.File(dir, filename);
+
+        try (java.io.FileWriter fw = new java.io.FileWriter(outFile, false)) {
+            fw.write("Ticker\n");
+            for (ScreenerResult r : screenerResults) {
+                if (r == null || r.ticker == null) continue;
+                fw.write(r.ticker.trim());
+                fw.write("\n");
+            }
+            pendingExportCsv = outFile.getAbsolutePath();
+            Toast.makeText(this, getString(R.string.toast_export_done, pendingExportCsv), Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, getString(R.string.toast_export_failed, e.getMessage()), Toast.LENGTH_LONG).show();
+        }
+    }
+    @Override
+    protected void onDestroy() {
+        try {
+            screenerCancelled.set(true);
+            if (screenerFuture != null) screenerFuture.cancel(true);
+            if (screenerExec != null) screenerExec.shutdownNow();
+        } catch (Exception ignored) {}
+        super.onDestroy();
+    }
+    private void showScreenerModeDialog() {
+        final CharSequence[] items = new CharSequence[] {
+                getString(R.string.screener_mode_lt20),
+                getString(R.string.screener_mode_gt45),
+                getString(R.string.screener_mode_ma60_3pct),
+                getString(R.string.screener_mode_kd9_mo_gc),
+                getString(R.string.screener_mode_kd9_wk_gc),
+                getString(R.string.screener_mode_csv_list),
+        };
+
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.screener_title)
+                .setItems(items, (dlg, which) -> {
+                    switch (which) {
+                        case 0: startScreening(ScreenerMode.LT20); break;
+                        case 1: startScreening(ScreenerMode.GT45); break;
+                        case 2: startScreening(ScreenerMode.MA60_3PCT); break;
+                        case 3: startScreening(ScreenerMode.KD9_MO_GC); break;
+                        case 4: startScreening(ScreenerMode.KD9_WK_GC); break;
+                        case 5: openCsvListPicker(); break; // CSV list mode
+                    }
+                })
+                .show();
+    }
+    private void startScreening(ScreenerMode mode) {
+        if (isScreening) return;
+
+        this.screenerMode = mode;
+        this.screenerCancelled.set(false);
+        this.isScreening = true;
+
+        setControlsEnabled(false);
+        screenerButton.setText("0%");
+
+        Toast.makeText(this,
+                getString(R.string.toast_screener_started, mode.name()),
+                Toast.LENGTH_SHORT).show();
+
+        screenerFuture = screenerExec.submit(() -> {
+            try {
+                // 1) 取得 ticker 清單（你可接：本機快取/爬取）
+                List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(MainActivity.this);
+                if (tickers == null || tickers.isEmpty()) {
+                    runOnUiThread(() -> onScreeningFailed(getString(R.string.error_ticker_list_empty)));
+                    return;
+                }
+
+                // 2) 跑篩選
+                List<ScreenerResult> results = ScreenerEngine.run(
+                        tickers,
+                        mode,
+                        yahooFinanceFetcher,
+                        (done, total) -> runOnUiThread(() -> {
+                            int pct = (total <= 0) ? 0 : Math.round(done * 100f / total);
+                            screenerButton.setText(getString(R.string.toast_screener_progress, pct));
+                        }),
+                        () -> screenerCancelled.get()
+                );
+
+                runOnUiThread(() -> onScreeningDone(mode, results));
+
+            } catch (Exception e) {
+                runOnUiThread(() -> onScreeningFailed(getString(R.string.error_screen_failed, e.getMessage())));
+            }
+        });
+    }
+
+    private void onScreeningFailed(String msg) {
+        isScreening = false;
+        screenerButton.setText(getString(R.string.screener_btn));
+        setControlsEnabled(true);
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+    }
+
+    private void onScreeningDone(ScreenerMode mode, List<ScreenerResult> results) {
+        isScreening = false;
+        screenerButton.setText(getString(R.string.screener_btn));
+        setControlsEnabled(true);
+
+        screenerResults.clear();
+        if (results != null) screenerResults.addAll(results);
+
+        screenerIndex = 0;
+        screenerSessionClosed = false;
+        allowSaveOnSwipeUp = true;
+
+        if (screenerResults.isEmpty()) {
+            Toast.makeText(this, getString(R.string.toast_screener_none, mode.name()), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_screener_done_title)
+                .setMessage(getString(R.string.dialog_screener_done_msg, mode.name(), screenerResults.size()))
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+
+        // 建議：觀看結果時切到與篩選一致的 interval（對齊 Python）
+        applyIntervalForScreener(mode);
+
+        showFilteredAt(0, true);
+    }
+    private void showFilteredAt(int idx, boolean forceDownload) {
+        if (screenerResults.isEmpty()) return;
+
+        int n = screenerResults.size();
+        screenerIndex = (idx % n + n) % n;
+
+        String t = screenerResults.get(screenerIndex).ticker;
+
+        // 更新輸入框（避免 focus 觸發額外 fetch）
+        suppressNextStockIdFocusFetch = true;
+        stockIdEditText.setText(t);
+
+        // 篩選結果顯示時：比照 Python，把日期改成「最近六個月」也可以
+        // 這裡保留你的 date input 設計：你若要完全對齊 Python，可改成 6 個月前的 1 日
+        executeFetchForFilteredTicker(t, forceDownload);
+    }
+
+    private void executeFetchForFilteredTicker(String ticker, boolean forceDownload) {
+        // 你現有 fetchStockDataWithFallback 本身會抓主股、再抓對比
+        // 若你想要 "forceDownload"，可在 YahooFinanceFetcher 加 cache key 或提供 bypass cache。
+        long start = getStartTimeLimit(currentInterval, true);
+        fetchStockDataWithFallback(ticker, currentInterval, start);
+    }
+
+    private void navFiltered(int step) {
+        if (isScreening || screenerResults.isEmpty()) return;
+        showFilteredAt(screenerIndex + step, true);
+    }
+
+    @Override
+    public void onChartFling(MotionEvent me1, MotionEvent me2, float velocityX, float velocityY) {
+        if (screenerResults.isEmpty()) return;
+
+        float dx = me2.getX() - me1.getX();
+        float dy = me2.getY() - me1.getY();
+
+        float absX = Math.abs(dx);
+        float absY = Math.abs(dy);
+
+        final float MIN_PX = 120f; // 你可依手感微調
+
+        // 以位移方向判斷（對齊你的指定：向右滑=右鍵、向左滑=左鍵、向上滑=ESC）
+        if (absX > absY && absX > MIN_PX) {
+            if (dx > 0) navFiltered(+1);   // 向右滑 => 下一檔（Right）
+            else        navFiltered(-1);   // 向左滑 => 上一檔（Left）
+            return;
+        }
+
+        if (absY > absX && absY > MIN_PX) {
+            if (dy < 0) onSwipeUpEsc();    // 向上滑 => ESC
+        }
+    }
+    private void onSwipeUpEsc() {
+        if (isScreening) {
+            screenerCancelled.set(true);
+            Toast.makeText(this, getString(R.string.toast_screener_cancelled), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (screenerResults.isEmpty()) return;
+
+        if (!screenerSessionClosed && allowSaveOnSwipeUp) {
+            askExportOnceThenCloseSession();
+            screenerSessionClosed = true;
+        }
+    }
+    private void askExportOnceThenCloseSession() {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_export_title)
+                .setMessage(R.string.dialog_export_msg)
+                .setPositiveButton(R.string.btn_yes, (d, w) -> exportScreenerResultsToCsv())
+                .setNegativeButton(R.string.btn_no, null)
+                .show();
+    }
     private void initCharts() {
         setupMainChart();
         setupk_kdChart();
@@ -1521,9 +1899,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     @Override public void onChartLongPressed(MotionEvent me) {}
     @Override public void onChartDoubleTapped(MotionEvent me) {}
-    @Override public void onChartSingleTapped(MotionEvent me) {}
-    @Override public void onChartFling(MotionEvent me1, MotionEvent me2, float velocityX, float velocityY) {}
-    @Override
+    @Override public void onChartSingleTapped(MotionEvent me) {}@Override
     public void onChartScale(MotionEvent me, float scaleX, float scaleY) {
         syncChartsXAxisOnly();
 

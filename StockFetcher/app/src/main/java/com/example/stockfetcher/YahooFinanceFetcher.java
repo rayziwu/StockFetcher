@@ -1,6 +1,6 @@
 package com.example.stockfetcher;
 
-// 註解版本號2.10版
+// 註解版本號3.02版
 
 import android.util.Log;
 
@@ -565,4 +565,30 @@ public void fetchStockDataAsync(String symbol, String interval, long startTimeLi
             public Long[] volume;
         }
     }
+    // YahooFinanceFetcher.java 內新增
+    public List<StockDayPrice> fetchStockDataBlocking(String symbol, String interval, long startTime) throws Exception {
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicReference<List<StockDayPrice>> ref =
+                new java.util.concurrent.atomic.AtomicReference<>(java.util.Collections.emptyList());
+        final java.util.concurrent.atomic.AtomicReference<String> err =
+                new java.util.concurrent.atomic.AtomicReference<>(null);
+
+        fetchStockDataAsync(symbol, interval, startTime, new DataFetchListener() {
+            @Override public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
+                ref.set(data);
+                latch.countDown();
+            }
+            @Override public void onError(String errorMessage) {
+                err.set(errorMessage);
+                latch.countDown();
+            }
+        });
+
+        // 避免永遠卡住：你可自行調整等待秒數
+        boolean ok = latch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+        if (!ok) throw new java.io.IOException("fetch timeout: " + symbol);
+        if (err.get() != null) throw new java.io.IOException(err.get());
+        return ref.get();
+    }
+
 }

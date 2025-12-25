@@ -22,7 +22,7 @@
 
     <string name="toast_loading">載入 %1$s / %2$s 的 %3$s 數據</string>
     <string name="error_load_failed">載入失敗：%1$s</string>
-     <string name="toast_loading_comparison">主代號: %1$s。正在載入對比代號 %2$s</string>
+    <string name="toast_loading_comparison">主代號：%1$s。正在載入對比代號：%2$s</string>
 
     <string-array name="interval_display_text">
         <item>@string/interval_day</item>
@@ -30,4 +30,50 @@
         <item>@string/interval_month</item>
         <item>@string/interval_hour</item>
     </string-array>
+
+    <string name="screener_btn">篩選</string>
+    <string name="screener_title">選擇篩選條件</string>
+
+    <string name="screener_mode_lt20">1. 最近連續40個交易日 KD40 &lt; 20 + 量放大</string>
+    <string name="screener_mode_gt45">2. 連續 KD40 &gt; 45 天數：21~29 + 量放大</string>
+    <string name="screener_mode_ma60_3pct" formatted="false">3. 最近連續40日：收盤價與 MA60 相差 ±3% 以內</string>
+    <string name="screener_mode_kd9_mo_gc">4. 月K KD9 黃金交叉</string>
+    <string name="screener_mode_kd9_wk_gc">5. 周K KD9 黃金交叉</string>
+    <string name="screener_mode_csv_list">6. 從 CSV 讀取股票清單</string>
+
+    <string name="toast_screener_running">篩選進行中，請稍候</string>
+    <string name="toast_screener_started">開始篩選：%1$s</string>
+    <string name="toast_screener_progress">%1$d%%</string>
+    <string name="toast_screener_cancelled">已取消篩選</string>
+    <string name="toast_screener_done">完成：%1$s，共 %2$d 檔</string>
+    <string name="toast_screener_none">完成：%1$s，沒有符合</string>
+
+    <string name="dialog_screener_done_title">篩選完成</string>
+    <string name="dialog_screener_done_msg">條件：%1$s\n筆數：%2$d\n\n操作：\n向右滑：下一檔\n向左滑：上一檔\n向上滑：結束此次篩選（僅詢問存檔一次）</string>
+
+    <string name="dialog_csv_loaded_title">已載入股票清單</string>
+    <string name="dialog_csv_loaded_msg">檔案：%1$s\n共 %2$d 檔\n\n操作：\n向右滑：下一檔\n向左滑：上一檔\n\n（此模式不詢問存檔）</string>
+
+    <string name="dialog_export_title">存檔</string>
+    <string name="dialog_export_msg">是否要將本次篩選結果存成 CSV？</string>
+    <string name="btn_yes">是</string>
+    <string name="btn_no">否</string>
+
+    <string name="error_ticker_list_empty">股票代碼清單為空（讀取/爬取失敗）</string>
+    <string name="error_screen_failed">篩選失敗：%1$s</string>
+
+    <!-- CSV / Export -->
+    <string name="screener_pick_csv_title">選擇 CSV 檔</string>
+    <string name="error_csv_dir_unavailable">CSV 目錄不可用（外部儲存空間可能無法使用）</string>
+    <string name="error_csv_not_found">在 %1$s 找不到任何 CSV 檔</string>
+    <string name="error_csv_no_tickers">%1$s 中沒有有效的股票代碼</string>
+
+    <string name="toast_export_nothing">沒有可匯出的結果</string>
+    <string name="toast_export_done">已匯出：%1$s</string>
+    <string name="toast_export_failed">匯出失敗：%1$s</string>
+
+    <!-- 目前 MainActivity 仍有部分 noData 文案硬編碼在 Java；以下保留不影響編譯 -->
+    <string name="nodata_kd_compare">KD 指標區 / 比較 K 線圖</string>
+    <string name="nodata_indicator_macd">MACD 指標區</string>
+    <string name="nodata_no_history">無 %1$s 歷史數據可供繪製。</string>
 </resources>
