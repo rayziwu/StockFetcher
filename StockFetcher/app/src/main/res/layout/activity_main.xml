@@ -148,19 +148,21 @@
                 android:id="@+id/intervalSwitchButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1.0"
+                android:layout_weight="0.9"
                 android:layout_marginStart="8dp"
                 android:paddingStart="4dp"
                 android:paddingEnd="4dp"
-                android:paddingLeft="4dp"
-                android:paddingRight="4dp"
+                android:paddingLeft="1dp"
+                android:paddingRight="1dp"
                 android:text="@string/interval_day" />
 
             <Button
                 android:id="@+id/screenerButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1.0"
+                android:layout_weight="1.1"
+                android:paddingLeft="1dp"
+                android:paddingRight="1dp"
                 android:text="@string/screener_btn"
                 android:imeOptions="actionDone" />
         </LinearLayout>

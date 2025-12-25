@@ -493,7 +493,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 // 1) 取得 ticker 清單（你可接：本機快取/爬取）
                 List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(MainActivity.this);
                 if (tickers == null || tickers.isEmpty()) {
-                    runOnUiThread(() -> onScreeningFailed(getString(R.string.error_ticker_list_empty)));
+                    String reasonTmp = TwTickerRepository.getLastError();
+                    final String reasonFinal =
+                            (reasonTmp == null || reasonTmp.trim().isEmpty())
+                                    ? getString(R.string.error_ticker_list_empty)
+                                    : reasonTmp;
+
+                    runOnUiThread(() -> onScreeningFailed(reasonFinal));
                     return;
                 }
 

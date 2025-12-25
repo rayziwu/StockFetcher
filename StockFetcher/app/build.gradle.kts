@@ -60,6 +60,7 @@ dependencies {
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
     // 4. Gson (如果您專案有用到，保留)
     implementation("com.google.code.gson:gson:2.13.2")
+    implementation("org.jsoup:jsoup:1.17.2")
 
     // 測試依賴
     testImplementation(libs.junit)
