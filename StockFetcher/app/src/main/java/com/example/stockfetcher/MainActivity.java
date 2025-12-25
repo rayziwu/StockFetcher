@@ -1607,8 +1607,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         legend.setHorizontalAlignment(Legend.LegendHorizontalAlignment.LEFT);
         legend.setOrientation(Legend.LegendOrientation.HORIZONTAL);
         legend.setDrawInside(true);
-        legend.setXOffset(5f);
-        legend.setYOffset(20f);
+        legend.setXOffset(20f);
+        legend.setYOffset(5f);
+        scaleLegendTextSizeBy(legend, 1.4f);
 
         mainChart.setDrawOrder(new CombinedChart.DrawOrder[]{
                 CombinedChart.DrawOrder.BAR,
@@ -1641,7 +1642,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         mainChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
         mainChart.setDrawMarkers(true);
     }
-
+    private void scaleLegendTextSizeBy(Legend legend, float factor) {
+        float density = getResources().getDisplayMetrics().density;
+        float curDp = legend.getTextSize() / density;   // px -> dp
+        legend.setTextSize(curDp * factor);             // setTextSize 需要 dp
+    }
     private void setupk_kdChart() {
         k_kdChart.getDescription().setEnabled(false);
         k_kdChart.setNoDataText("KD 指標區 / 比較 K 線圖");
@@ -1656,8 +1661,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         legend.setHorizontalAlignment(Legend.LegendHorizontalAlignment.LEFT);
         legend.setOrientation(Legend.LegendOrientation.HORIZONTAL);
         legend.setDrawInside(true);
-        legend.setXOffset(5f);
+        legend.setXOffset(20f);
         legend.setYOffset(0f);
+        scaleLegendTextSizeBy(legend, 1.4f);
+
 
         k_kdChart.setDrawOrder(new CombinedChart.DrawOrder[]{
                 CombinedChart.DrawOrder.CANDLE,
@@ -2412,11 +2419,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private LineData generateLineData(List<StockDayPrice> displayedList) {
         LineData lineData = new LineData();
 
-        addMaLine(lineData, displayedList, "MA 35", p -> p.ma35, Color.YELLOW);
-        addMaLine(lineData, displayedList, "MA 60", p -> p.ma60, Color.MAGENTA);
-        addMaLine(lineData, displayedList, "MA 120", p -> p.ma120, Color.CYAN);
-        addMaLine(lineData, displayedList, "MA 200", p -> p.ma200, Color.BLUE);
-        addMaLine(lineData, displayedList, "MA 240", p -> p.ma240, Color.rgb(255, 165, 0));
+        addMaLine(lineData, displayedList, "MA35", p -> p.ma35, Color.YELLOW);
+        addMaLine(lineData, displayedList, "MA60", p -> p.ma60, Color.MAGENTA);
+        addMaLine(lineData, displayedList, "MA120", p -> p.ma120, Color.CYAN);
+        addMaLine(lineData, displayedList, "MA200", p -> p.ma200, Color.BLUE);
+        addMaLine(lineData, displayedList, "MA240", p -> p.ma240, Color.rgb(255, 165, 0));
 
         return lineData;
     }
