@@ -68,7 +68,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     // MainActivity fields 新增
     private Button screenerButton;
-
+    // 篩選完成後是否已自動存檔（避免重複寫檔）
+    private boolean screenerAutoExported = false;
     private volatile boolean isScreening = false;
     private java.util.concurrent.ExecutorService screenerExec =
             java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -413,33 +414,131 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
     private void exportScreenerResultsToCsv() {
         if (screenerResults.isEmpty()) {
-            Toast.makeText(this, getString(R.string.toast_export_nothing), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Nothing to export", Toast.LENGTH_SHORT).show();
             return;
         }
 
         java.io.File dir = getExternalFilesDir(null);
         if (dir == null) {
-            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            Toast.makeText(this,
+                    getString(R.string.error_screen_failed, "Export dir unavailable"),
+                    Toast.LENGTH_LONG).show();
             return;
         }
 
         String ts = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new java.util.Date());
-        String tag = (screenerMode != null) ? screenerMode.name() : "MODE";
+
+        // Tag 對齊 Python
+        final String tag;
+        if (screenerMode == null) {
+            tag = "MODE";
+        } else {
+            switch (screenerMode) {
+                case LT20:      tag = "LT20"; break;
+                case GT45:      tag = "GT45"; break;
+                case MA60_3PCT: tag = "MA60_3PCT_40D"; break;
+                case KD9_MO_GC: tag = "KD9_MO_GC"; break;
+                case KD9_WK_GC: tag = "KD9_WK_GC"; break;
+                default:        tag = "MODE"; break;
+            }
+        }
+
         String filename = "TW_SCREENER_" + tag + "_" + ts + ".csv";
         java.io.File outFile = new java.io.File(dir, filename);
 
         try (java.io.FileWriter fw = new java.io.FileWriter(outFile, false)) {
-            fw.write("Ticker\n");
-            for (ScreenerResult r : screenerResults) {
-                if (r == null || r.ticker == null) continue;
-                fw.write(r.ticker.trim());
-                fw.write("\n");
+
+            // ===== Header (依模式變動，對齊 Python 輸出欄位概念) =====
+            String header;
+            if (screenerMode == ScreenerMode.MA60_3PCT) {
+                header = "Ticker,Name,Industry,AvgClose60,LatestClose,MA_60,MA60_DiffPct\n";
+            } else if (screenerMode == ScreenerMode.GT45) {
+                header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40,KD45_RunDays\n";
+            } else if (screenerMode == ScreenerMode.LT20) {
+                header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40\n";
+            } else if (screenerMode == ScreenerMode.KD9_MO_GC || screenerMode == ScreenerMode.KD9_WK_GC) {
+                header = "Ticker,Name,Industry,AvgClose60,LatestClose,Last_K9,Last_D9,Cross_Date\n";
+            } else {
+                // fallback：輸出完整欄位
+                header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK,LastD,RunDays,MA_60,MA60_DiffPct,Cross_Date\n";
             }
+
+            fw.write(header);
+
+            // ===== Rows =====
+            for (ScreenerResult r : screenerResults) {
+                if (r == null) continue;
+
+                // base
+                String base =
+                        csv(r.ticker) + "," +
+                                csv(r.name) + "," +
+                                csv(r.industry) + "," +
+                                numOrEmpty(r.avgClose60) + "," +
+                                numOrEmpty(r.latestClose);
+
+                if (screenerMode == ScreenerMode.MA60_3PCT) {
+                    fw.write(base + "," +
+                            numOrEmpty(r.ma60) + "," +
+                            numOrEmpty(r.ma60DiffPct) +
+                            "\n");
+                } else if (screenerMode == ScreenerMode.GT45) {
+                    fw.write(base + "," +
+                            numOrEmpty(r.lastK) + "," +                  // LastK40
+                            (r.runDays == null ? "" : r.runDays) +
+                            "\n");
+                } else if (screenerMode == ScreenerMode.LT20) {
+                    fw.write(base + "," +
+                            numOrEmpty(r.lastK) +                         // LastK40
+                            "\n");
+                } else if (screenerMode == ScreenerMode.KD9_MO_GC || screenerMode == ScreenerMode.KD9_WK_GC) {
+                    fw.write(base + "," +
+                            numOrEmpty(r.lastK) + "," +                   // Last_K9
+                            numOrEmpty(r.lastD) + "," +                   // Last_D9
+                            csv(r.crossDate) +
+                            "\n");
+                } else {
+                    // fallback 全欄位
+                    fw.write(base + "," +
+                            numOrEmpty(r.lastK) + "," +
+                            numOrEmpty(r.lastD) + "," +
+                            (r.runDays == null ? "" : r.runDays) + "," +
+                            numOrEmpty(r.ma60) + "," +
+                            numOrEmpty(r.ma60DiffPct) + "," +
+                            csv(r.crossDate) +
+                            "\n");
+                }
+            }
+
             pendingExportCsv = outFile.getAbsolutePath();
-            Toast.makeText(this, getString(R.string.toast_export_done, pendingExportCsv), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Saved: " + pendingExportCsv, Toast.LENGTH_LONG).show();
+
         } catch (Exception e) {
-            Toast.makeText(this, getString(R.string.toast_export_failed, e.getMessage()), Toast.LENGTH_LONG).show();
+            Toast.makeText(this,
+                    getString(R.string.error_screen_failed, e.getMessage()),
+                    Toast.LENGTH_LONG).show();
         }
+    }
+
+// ---------- helpers：放在 MainActivity 內任意位置（若你已經有同名可跳過） ----------
+
+    private String csv(String s) {
+        if (s == null) return "";
+        String v = s;
+        boolean needQuote = v.contains(",") || v.contains("\"") || v.contains("\n") || v.contains("\r");
+        if (!needQuote) return v;
+        return "\"" + v.replace("\"", "\"\"") + "\"";
+    }
+
+    private String numOrEmpty(double v) {
+        if (Double.isNaN(v) || Double.isInfinite(v)) return "";
+        return String.valueOf(v);
+    }
+
+    private String numOrEmpty(Double v) {
+        if (v == null) return "";
+        if (Double.isNaN(v) || Double.isInfinite(v)) return "";
+        return String.valueOf(v);
     }
     @Override
     protected void onDestroy() {
@@ -538,18 +637,35 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         screenerResults.clear();
         if (results != null) screenerResults.addAll(results);
 
+// 重置自動匯出旗標
+        screenerAutoExported = false;
+        pendingExportCsv = null;
         screenerIndex = 0;
         screenerSessionClosed = false;
         allowSaveOnSwipeUp = true;
 
         if (screenerResults.isEmpty()) {
-            Toast.makeText(this, getString(R.string.toast_screener_none, mode.name()), Toast.LENGTH_LONG).show();
+            Toast.makeText(this,
+                    getString(R.string.toast_screener_none, getScreenerModeLabel(mode)),
+                    Toast.LENGTH_LONG).show();
             return;
         }
 
+// ✅ 自動匯出（只做一次）
+        if (!screenerAutoExported) {
+            exportScreenerResultsToCsv();
+            screenerAutoExported = true;
+        }
+
+// ✅ 用 toast_screener_done（你 strings.xml 已有）
+        Toast.makeText(this,
+                getString(R.string.toast_screener_done, getScreenerModeLabel(mode), screenerResults.size()),
+                Toast.LENGTH_LONG).show();
+
         new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.dialog_screener_done_title)
-                .setMessage(getString(R.string.dialog_screener_done_msg, mode.name(), screenerResults.size()))
+                .setMessage(getString(R.string.dialog_screener_done_msg,
+                        getScreenerModeLabel(mode), screenerResults.size()))
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
 
@@ -574,7 +690,23 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         // 這裡保留你的 date input 設計：你若要完全對齊 Python，可改成 6 個月前的 1 日
         executeFetchForFilteredTicker(t, forceDownload);
     }
-
+    private String getScreenerModeLabel(ScreenerMode mode) {
+        if (mode == null) return "";
+        switch (mode) {
+            case LT20:
+                return getString(R.string.screener_mode_lt20);
+            case GT45:
+                return getString(R.string.screener_mode_gt45);
+            case MA60_3PCT:
+                return getString(R.string.screener_mode_ma60_3pct);
+            case KD9_MO_GC:
+                return getString(R.string.screener_mode_kd9_mo_gc);
+            case KD9_WK_GC:
+                return getString(R.string.screener_mode_kd9_wk_gc);
+            default:
+                return mode.name();
+        }
+    }
     private void executeFetchForFilteredTicker(String ticker, boolean forceDownload) {
         // 你現有 fetchStockDataWithFallback 本身會抓主股、再抓對比
         // 若你想要 "forceDownload"，可在 YahooFinanceFetcher 加 cache key 或提供 bypass cache。
@@ -618,13 +750,23 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return;
         }
 
-        // 沒結果就不用做事
         if (screenerResults.isEmpty()) return;
 
-        // CSV list 模式你已經設 allowSaveOnSwipeUp=false，這裡會自動略過
-        if (!screenerSessionClosed && allowSaveOnSwipeUp) {
-            exportScreenerResultsToCsv();   // ✅ 直接存檔，不詢問
-            screenerSessionClosed = true;   // ✅ 仍維持「只存一次」的設計
+        // CSV list 模式你已設 allowSaveOnSwipeUp=false；這裡就當作純結束提示也可以
+        if (!screenerSessionClosed) {
+            screenerSessionClosed = true;
+
+            // ✅ 提示已存檔位置（若有）
+            if (pendingExportCsv != null && !pendingExportCsv.trim().isEmpty()) {
+                Toast.makeText(this, "Saved: " + pendingExportCsv, Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Screening session ended", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            // 已結束過就再提示一次（可省略）
+            if (pendingExportCsv != null && !pendingExportCsv.trim().isEmpty()) {
+                Toast.makeText(this, "Saved: " + pendingExportCsv, Toast.LENGTH_LONG).show();
+            }
         }
     }
     private void askExportOnceThenCloseSession() {
