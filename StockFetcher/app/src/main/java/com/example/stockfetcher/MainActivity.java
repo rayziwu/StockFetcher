@@ -611,17 +611,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
     }
     private void onSwipeUpEsc() {
+        // 篩選進行中：上滑 => 取消篩選
         if (isScreening) {
             screenerCancelled.set(true);
             Toast.makeText(this, getString(R.string.toast_screener_cancelled), Toast.LENGTH_SHORT).show();
             return;
         }
 
+        // 沒結果就不用做事
         if (screenerResults.isEmpty()) return;
 
+        // CSV list 模式你已經設 allowSaveOnSwipeUp=false，這裡會自動略過
         if (!screenerSessionClosed && allowSaveOnSwipeUp) {
-            askExportOnceThenCloseSession();
-            screenerSessionClosed = true;
+            exportScreenerResultsToCsv();   // ✅ 直接存檔，不詢問
+            screenerSessionClosed = true;   // ✅ 仍維持「只存一次」的設計
         }
     }
     private void askExportOnceThenCloseSession() {
@@ -1365,7 +1368,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             if (!Double.isNaN(p.kdD)) dEntries.add(new Entry(i, (float) p.kdD));
         }
 
-        String kLabel = String.format(Locale.US, "K%d線", currentKDNPeriod);
+        String kLabel = String.format(Locale.US, "K%d", currentKDNPeriod);
         LineDataSet kSet = new LineDataSet(kEntries, kLabel);
         kSet.setColor(Color.LTGRAY);
         kSet.setLineWidth(1.5f);
@@ -1374,7 +1377,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         kSet.setAxisDependency(YAxis.AxisDependency.RIGHT);
         lineData.addDataSet(kSet);
 
-        String dLabel = String.format(Locale.US, "D%d線", currentKDNPeriod);
+        String dLabel = String.format(Locale.US, "D%d", currentKDNPeriod);
         LineDataSet dSet = new LineDataSet(dEntries, dLabel);
         dSet.setColor(DIM_YELLOW);
         dSet.setLineWidth(1.5f);
@@ -1523,7 +1526,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         if ((mode.equals("ALL") || mode.equals("K"))
                 && data.getCandleData() != null && data.getCandleData().getDataSetCount() > 0) {
             customEntries.add(new LegendEntry(
-                    currentStockId + " K線",
+                    currentStockId,
                     Legend.LegendForm.SQUARE, 10f, 5f, null,
                     data.getCandleData().getDataSetByIndex(0).getIncreasingColor()
             ));
@@ -1726,8 +1729,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             final int DIM_WHITE = Color.rgb(120, 120, 120);
             final int DIM_YELLOW = Color.rgb(100, 100, 0);
 
-            String kLegendText = String.format(Locale.getDefault(), "K%d線", currentKDNPeriod);
-            String dLegendText = String.format(Locale.getDefault(), "D%d線", currentKDNPeriod);
+            String kLegendText = String.format(Locale.getDefault(), "K%d", currentKDNPeriod);
+            String dLegendText = String.format(Locale.getDefault(), "D%d", currentKDNPeriod);
 
             customEntries.add(new LegendEntry(kLegendText, Legend.LegendForm.LINE, 10f, 3f, null, DIM_WHITE));
             customEntries.add(new LegendEntry(dLegendText, Legend.LegendForm.LINE, 10f, 3f, null, DIM_YELLOW));
@@ -1749,7 +1752,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
 
             if (!entries.isEmpty()) {
-                String kLineLabel = displayedComparisonSymbol + " K線";
+                String kLineLabel = displayedComparisonSymbol;
                 CandleDataSet set = new CandleDataSet(entries, kLineLabel);
                 set.setDrawIcons(false);
                 set.setShadowColor(Color.GRAY);
