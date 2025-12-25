@@ -1,6 +1,7 @@
-// *** 註解版本號：3.02版
+// *** 註解版本號：3.10版
 package com.example.stockfetcher;
 
+import android.view.GestureDetector;
 import android.app.DatePickerDialog;
 import android.content.Context;
 import android.content.res.Resources;
@@ -70,6 +71,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private Button screenerButton;
     // 篩選完成後是否已自動存檔（避免重複寫檔）
     private boolean screenerAutoExported = false;
+    // 只要成功載入一次，就不再重複掃描股票代碼.csv
+    private boolean tickerMetaLoadedOnce = false;
     private volatile boolean isScreening = false;
     private java.util.concurrent.ExecutorService screenerExec =
             java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -81,7 +84,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private boolean screenerSessionClosed = true;
     private boolean allowSaveOnSwipeUp = true;
     private ScreenerMode screenerMode = ScreenerMode.LT20;
-
+    private GestureDetector navGestureDetector;
     // 匯出 CSV 用
     private String pendingExportCsv = null;
     private enum IndicatorMode { MACD, RSI, DMI }
@@ -147,12 +150,81 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         bindViews();
         initUi();
         initCharts();
-
+        preloadTickerMetaIfCsvExists();
         // 程式啟動時，預設繪製
         fetchStockDataWithFallback(currentStockId, currentInterval,
                 getStartTimeLimit(currentInterval, isSwitchingInterval));
     }
+    private void preloadTickerMetaIfCsvExists() {
+        if (tickerMetaLoadedOnce) return;
 
+        java.io.File internal = new java.io.File(getFilesDir(), TICKERS_CACHE_FILE);
+
+        // 兼容：如果你有改成存 externalFilesDir，也一起找（不影響原本 internal）
+        java.io.File external = null;
+        try {
+            java.io.File extDir = getExternalFilesDir(null);
+            if (extDir != null) external = new java.io.File(extDir, TICKERS_CACHE_FILE);
+        } catch (Exception ignored) {}
+
+        java.io.File f = internal.exists() ? internal : (external != null && external.exists() ? external : null);
+        if (f == null) return;
+
+        loadTickerMetaFromCsv(f);
+        tickerMetaLoadedOnce = true;
+    }
+
+    private void loadTickerMetaFromCsv(java.io.File file) {
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+
+            String header = br.readLine();
+            if (header == null) return;
+            if (header.startsWith("\uFEFF")) header = header.substring(1); // BOM
+
+            String[] h = splitCsvLine(header);
+
+            int iTicker = -1, iName = -1, iInd = -1;
+            for (int i = 0; i < h.length; i++) {
+                String col = h[i].trim().toLowerCase(Locale.US);
+                if (col.equals("ticker")) iTicker = i;
+                else if (col.equals("name")) iName = i;
+                else if (col.equals("industry") || col.equals("category")) iInd = i;
+            }
+
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+
+                String[] cols = splitCsvLine(line);
+
+                String tk = (iTicker >= 0 && iTicker < cols.length) ? cols[iTicker].trim()
+                        : (cols.length > 0 ? cols[0].trim() : "");
+
+                if (tk.isEmpty() || tk.equalsIgnoreCase("ticker")) continue;
+
+                String tku = tk.trim().toUpperCase(Locale.US);
+
+                String name = (iName >= 0 && iName < cols.length) ? cols[iName].trim() : "";
+                String ind  = (iInd >= 0 && iInd < cols.length) ? cols[iInd].trim() : "";
+
+                // 存 full ticker
+                tickerMetaMap.put(tku, new TickerInfo(tku, name, ind));
+
+                // 兼容：如果是 2330.TW / 2330.TWO，也順便存 2330（避免使用者沒打後綴時查不到）
+                if (tku.matches("^\\d{4}\\.(TW|TWO)$")) {
+                    String base = tku.substring(0, 4);
+                    // 若已存在 base key，保留先來的（可依你需求改成偏好 .TW）
+                    if (!tickerMetaMap.containsKey(base)) {
+                        tickerMetaMap.put(base, new TickerInfo(base, name, ind));
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            Log.w(TAG, "loadTickerMetaFromCsv failed: " + e.getMessage());
+        }
+    }
     private void bindViews() {
         intervalSwitchButton = findViewById(R.id.intervalSwitchButton);
         viewModeButton = findViewById(R.id.viewModeButton);
@@ -824,26 +896,26 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     @Override
     public void onChartFling(MotionEvent me1, MotionEvent me2, float velocityX, float velocityY) {
-        if (screenerResults.isEmpty()) return;
+     //   if (screenerResults.isEmpty()) return;
 
-        float dx = me2.getX() - me1.getX();
-        float dy = me2.getY() - me1.getY();
+     //   float dx = me2.getX() - me1.getX();
+     //   float dy = me2.getY() - me1.getY();
 
-        float absX = Math.abs(dx);
-        float absY = Math.abs(dy);
+     //   float absX = Math.abs(dx);
+     //   float absY = Math.abs(dy);
 
-        final float MIN_PX = 120f; // 你可依手感微調
+     //   final float MIN_PX = 120f; // 你可依手感微調
 
         // 以位移方向判斷（對齊你的指定：向右滑=右鍵、向左滑=左鍵、向上滑=ESC）
-        if (absX > absY && absX > MIN_PX) {
-            if (dx > 0) navFiltered(+1);   // 向右滑 => 下一檔（Right）
-            else        navFiltered(-1);   // 向左滑 => 上一檔（Left）
-            return;
-        }
+     //   if (absX > absY && absX > MIN_PX) {
+     //   if (dx > 0) navFiltered(+1);   // 向右滑 => 下一檔（Right）
+     //       else        navFiltered(-1);   // 向左滑 => 上一檔（Left）
+     //       return;
+     //   }
 
-        if (absY > absX && absY > MIN_PX) {
-            if (dy < 0) onSwipeUpEsc();    // 向上滑 => ESC
-        }
+     //   if (absY > absX && absY > MIN_PX) {
+     //       if (dy < 0) onSwipeUpEsc();    // 向上滑 => ESC
+     //   }
     }
     private void onSwipeUpEsc() {
         // 篩選進行中：上滑 => 取消篩選
@@ -884,7 +956,50 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         setupMainChart();
         setupk_kdChart();
         setupIndicatorChart();
+
         mainChart.setOnChartGestureListener(this);
+
+        // ✅ 導航手勢改掛在第二圖區（k_kdChart）
+        initNavGesturesOnKdChart();
+    }
+
+    private void initNavGesturesOnKdChart() {
+        navGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                if (e1 == null || e2 == null) return false;
+                if (screenerResults.isEmpty()) return false;
+
+                float dx = e2.getX() - e1.getX();
+                float dy = e2.getY() - e1.getY();
+                float absX = Math.abs(dx);
+                float absY = Math.abs(dy);
+
+                final float MIN_PX = 120f;
+
+                // 向右滑/向左滑：換股
+                if (absX > absY && absX > MIN_PX) {
+                    if (dx > 0) navFiltered(+1);  // 右滑 => 下一檔
+                    else        navFiltered(-1);  // 左滑 => 上一檔
+                    return true;
+                }
+
+                // 向上滑：結束/提示（你目前 onSwipeUpEsc 也包含取消篩選的邏輯）
+                if (absY > absX && absY > MIN_PX && dy < 0) {
+                    onSwipeUpEsc();
+                    return true;
+                }
+
+                return false;
+            }
+        });
+
+        // 讓第二圖區吃掉手勢，不把 touch 交給 chart（避免它自己處理拖拉/高亮）
+        k_kdChart.setClickable(true);
+        k_kdChart.setOnTouchListener((v, event) -> {
+            navGestureDetector.onTouchEvent(event);
+            return true; // ✅ consume，避免影響 chart 自己的觸控
+        });
     }
 
     private void applyLanguagePolicyBySystemLocale() {
