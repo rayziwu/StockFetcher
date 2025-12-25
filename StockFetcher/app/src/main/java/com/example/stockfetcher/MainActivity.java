@@ -1,6 +1,7 @@
 // *** 註解版本號：3.10版
 package com.example.stockfetcher;
 
+import android.content.pm.PackageManager;
 import android.view.GestureDetector;
 import android.app.DatePickerDialog;
 import android.content.Context;
@@ -144,6 +145,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         applyLanguagePolicyBySystemLocale();
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 100);
+                return; // 等使用者回應後再啟動篩選/Service
+            }
+        }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
@@ -154,6 +162,28 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         // 程式啟動時，預設繪製
         fetchStockDataWithFallback(currentStockId, currentInterval,
                 getStartTimeLimit(currentInterval, isSwitchingInterval));
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+
+        android.content.IntentFilter f = new android.content.IntentFilter();
+        f.addAction(ScreenerForegroundService.ACTION_PROGRESS);
+        f.addAction(ScreenerForegroundService.ACTION_DONE);
+        f.addAction(ScreenerForegroundService.ACTION_FAIL);
+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            // ✅ Android 13+ 必須指定 exported/not_exported
+            registerReceiver(screenerReceiver, f, android.content.Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenerReceiver, f);
+        }
+    }
+    @Override
+    protected void onStop() {
+        try { unregisterReceiver(screenerReceiver); } catch (Exception ignored) {}
+        super.onStop();
     }
     private void preloadTickerMetaIfCsvExists() {
         if (tickerMetaLoadedOnce) return;
@@ -718,11 +748,27 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     @Override
     protected void onDestroy() {
         try {
-            screenerCancelled.set(true);
+            //screenerCancelled.set(true);
+            cancelScreeningService();
             if (screenerFuture != null) screenerFuture.cancel(true);
             if (screenerExec != null) screenerExec.shutdownNow();
         } catch (Exception ignored) {}
         super.onDestroy();
+    }
+    private void startScreening(ScreenerMode mode) {
+        if (isScreening) return;
+
+        this.screenerMode = mode;
+        this.isScreening = true;
+        setControlsEnabled(false);
+        screenerButton.setText("0%");
+
+        // Android 13+ 沒通知權限時，FGS 可能無法正常顯示通知而被系統終止
+        //（建議你在 UI 層先申請 POST_NOTIFICATIONS 再啟動）
+        android.content.Intent it = new android.content.Intent(this, ScreenerForegroundService.class);
+        it.setAction(ScreenerForegroundService.ACTION_START);
+        it.putExtra(ScreenerForegroundService.EXTRA_MODE, mode.name());
+        androidx.core.content.ContextCompat.startForegroundService(this, it);
     }
     private void showScreenerModeDialog() {
         final CharSequence[] items = new CharSequence[] {
@@ -747,54 +793,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                     }
                 })
                 .show();
-    }
-    private void startScreening(ScreenerMode mode) {
-        if (isScreening) return;
-
-        this.screenerMode = mode;
-        this.screenerCancelled.set(false);
-        this.isScreening = true;
-
-        setControlsEnabled(false);
-        screenerButton.setText("0%");
-
-        Toast.makeText(this,
-                getString(R.string.toast_screener_started, mode.name()),
-                Toast.LENGTH_SHORT).show();
-
-        screenerFuture = screenerExec.submit(() -> {
-            try {
-                // 1) 取得 ticker 清單（你可接：本機快取/爬取）
-                List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(MainActivity.this);
-                if (tickers == null || tickers.isEmpty()) {
-                    String reasonTmp = TwTickerRepository.getLastError();
-                    final String reasonFinal =
-                            (reasonTmp == null || reasonTmp.trim().isEmpty())
-                                    ? getString(R.string.error_ticker_list_empty)
-                                    : reasonTmp;
-
-                    runOnUiThread(() -> onScreeningFailed(reasonFinal));
-                    return;
-                }
-
-                // 2) 跑篩選
-                List<ScreenerResult> results = ScreenerEngine.run(
-                        tickers,
-                        mode,
-                        yahooFinanceFetcher,
-                        (done, total) -> runOnUiThread(() -> {
-                            int pct = (total <= 0) ? 0 : Math.round(done * 100f / total);
-                            screenerButton.setText(getString(R.string.toast_screener_progress, pct));
-                        }),
-                        () -> screenerCancelled.get()
-                );
-
-                runOnUiThread(() -> onScreeningDone(mode, results));
-
-            } catch (Exception e) {
-                runOnUiThread(() -> onScreeningFailed(getString(R.string.error_screen_failed, e.getMessage())));
-            }
-        });
     }
 
     private void onScreeningFailed(String msg) {
@@ -888,11 +886,223 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         long start = getStartTimeLimit(currentInterval, true);
         fetchStockDataWithFallback(ticker, currentInterval, start);
     }
+    private List<ScreenerResult> readScreenerResultsFromCsv(String csvPath) {
+        List<ScreenerResult> out = new ArrayList<>();
+        if (csvPath == null || csvPath.trim().isEmpty()) return out;
 
+        java.io.File f = new java.io.File(csvPath);
+        if (!f.exists()) return out;
+
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8))) {
+
+            String headerLine = br.readLine();
+            if (headerLine == null) return out;
+            if (headerLine.startsWith("\uFEFF")) headerLine = headerLine.substring(1); // BOM
+
+            String[] header = splitCsvLine(headerLine);
+            java.util.Map<String, Integer> col = new java.util.HashMap<>();
+            for (int i = 0; i < header.length; i++) {
+                String key = header[i] == null ? "" : header[i].trim().toLowerCase(Locale.US);
+                if (!key.isEmpty()) col.put(key, i);
+            }
+
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                String[] cols = splitCsvLine(line);
+
+                String ticker = getCol(cols, col, "ticker");
+                if (ticker == null || ticker.trim().isEmpty()) continue;
+
+                String name = nz(getCol(cols, col, "name"));
+                String industry = nz(getCol(cols, col, "industry"));
+
+                double avgClose60 = parseDoubleOrNaN(getCol(cols, col, "avgclose60"));
+                double latestClose = parseDoubleOrNaN(getCol(cols, col, "latestclose"));
+
+                // 依輸出模式，可能是 LastK40 / Last_K9 / LastK
+                Double lastK = parseNullableDouble(
+                        firstNonEmpty(
+                                getCol(cols, col, "lastk40"),
+                                getCol(cols, col, "last_k9"),
+                                getCol(cols, col, "lastk")
+                        )
+                );
+
+                Double lastD = parseNullableDouble(
+                        firstNonEmpty(
+                                getCol(cols, col, "last_d9"),
+                                getCol(cols, col, "lastd")
+                        )
+                );
+
+                Integer runDays = parseNullableInt(
+                        firstNonEmpty(
+                                getCol(cols, col, "kd45_rundays"),
+                                getCol(cols, col, "rundays")
+                        )
+                );
+
+                Double ma60 = parseNullableDouble(
+                        firstNonEmpty(
+                                getCol(cols, col, "ma_60"),
+                                getCol(cols, col, "ma60")
+                        )
+                );
+
+                Double ma60DiffPct = parseNullableDouble(
+                        firstNonEmpty(
+                                getCol(cols, col, "ma60_diffpct"),
+                                getCol(cols, col, "ma60diffpct")
+                        )
+                );
+
+                String crossDate = nzOrNull(
+                        firstNonEmpty(
+                                getCol(cols, col, "cross_date"),
+                                getCol(cols, col, "crossdate")
+                        )
+                );
+
+                ScreenerResult r = new ScreenerResult(
+                        ticker.trim().toUpperCase(Locale.US),
+                        name,
+                        industry,
+                        avgClose60,
+                        latestClose,
+                        lastK,
+                        lastD,
+                        runDays,
+                        ma60,
+                        ma60DiffPct,
+                        crossDate
+                );
+                out.add(r);
+            }
+
+        } catch (Exception e) {
+            Log.w(TAG, "readScreenerResultsFromCsv failed: " + e.getMessage());
+        }
+
+        return out;
+    }
+
+    private String getCol(String[] cols, java.util.Map<String, Integer> col, String keyLower) {
+        Integer i = col.get(keyLower);
+        if (i == null) return null;
+        if (i < 0 || i >= cols.length) return null;
+        return cols[i] == null ? null : cols[i].trim();
+    }
+
+    private String nz(String s) { return s == null ? "" : s.trim(); }
+    private String nzOrNull(String s) {
+        if (s == null) return null;
+        s = s.trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    private String firstNonEmpty(String... ss) {
+        if (ss == null) return null;
+        for (String s : ss) {
+            if (s != null && !s.trim().isEmpty()) return s.trim();
+        }
+        return null;
+    }
+
+    private double parseDoubleOrNaN(String s) {
+        if (s == null || s.trim().isEmpty()) return Double.NaN;
+        try { return Double.parseDouble(s.trim()); }
+        catch (Exception ignored) { return Double.NaN; }
+    }
+
+    private Double parseNullableDouble(String s) {
+        if (s == null || s.trim().isEmpty()) return null;
+        try { return Double.parseDouble(s.trim()); }
+        catch (Exception ignored) { return null; }
+    }
+
+    private Integer parseNullableInt(String s) {
+        if (s == null || s.trim().isEmpty()) return null;
+        try { return Integer.parseInt(s.trim()); }
+        catch (Exception ignored) { return null; }
+    }
     private void navFiltered(int step) {
         if (isScreening || screenerResults.isEmpty()) return;
         showFilteredAt(screenerIndex + step, true);
     }
+    private final android.content.BroadcastReceiver screenerReceiver =
+            new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context context, android.content.Intent intent) {
+                    if (intent == null) return;
+
+                    String a = intent.getAction();
+                    if (a == null) return;
+
+                    if (ScreenerForegroundService.ACTION_PROGRESS.equals(a)) {
+                        int done = intent.getIntExtra(ScreenerForegroundService.EXTRA_DONE, 0);
+                        int total = intent.getIntExtra(ScreenerForegroundService.EXTRA_TOTAL, 0);
+
+                        int pct = (total <= 0) ? 0 : Math.round(done * 100f / total);
+                        if (screenerButton != null) {
+                            screenerButton.setText(getString(R.string.toast_screener_progress, pct));
+                        }
+                        return;
+                    }
+
+                    if (ScreenerForegroundService.ACTION_FAIL.equals(a)) {
+                        isScreening = false;
+                        setControlsEnabled(true);
+                        if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
+
+                        String err = intent.getStringExtra(ScreenerForegroundService.EXTRA_ERROR);
+                        Toast.makeText(MainActivity.this, err == null ? "Failed" : err, Toast.LENGTH_LONG).show();
+                        return;
+                    }
+
+                    if (ScreenerForegroundService.ACTION_DONE.equals(a)) {
+                        isScreening = false;
+                        setControlsEnabled(true);
+                        if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
+
+                        pendingExportCsv = intent.getStringExtra(ScreenerForegroundService.EXTRA_CSV_PATH);
+
+                        List<ScreenerResult> results = readScreenerResultsFromCsv(pendingExportCsv);
+
+                        screenerResults.clear();
+                        if (results != null) screenerResults.addAll(results);
+
+                        screenerIndex = 0;
+                        screenerSessionClosed = false;
+                        allowSaveOnSwipeUp = true;
+
+                        if (screenerResults.isEmpty()) {
+                            Toast.makeText(MainActivity.this,
+                                    getString(R.string.toast_screener_none, getScreenerModeLabel(screenerMode)),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+
+                        Toast.makeText(MainActivity.this,
+                                getString(R.string.toast_screener_done, getScreenerModeLabel(screenerMode), screenerResults.size()),
+                                Toast.LENGTH_LONG).show();
+
+                        new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                                .setTitle(R.string.dialog_screener_done_title)
+                                .setMessage(getString(R.string.dialog_screener_done_msg,
+                                        getScreenerModeLabel(screenerMode), screenerResults.size()))
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+
+                        // 對齊篩選用的 interval（你原本就有）
+                        applyIntervalForScreener(screenerMode);
+
+                        // ✅ 顯示第一檔，之後左右滑就會輪播
+                        showFilteredAt(0, true);
+                    }
+                }
+            };
 
     @Override
     public void onChartFling(MotionEvent me1, MotionEvent me2, float velocityX, float velocityY) {
@@ -917,10 +1127,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
      //       if (dy < 0) onSwipeUpEsc();    // 向上滑 => ESC
      //   }
     }
+
+    private void cancelScreeningService() {
+        android.content.Intent it = new android.content.Intent(this, ScreenerForegroundService.class);
+        it.setAction(ScreenerForegroundService.ACTION_CANCEL);
+
+        // 用 startService 送 CANCEL 指令即可（Service 端接到後自行 stopSelf）
+        startService(it);
+    }
     private void onSwipeUpEsc() {
         // 篩選進行中：上滑 => 取消篩選
         if (isScreening) {
-            screenerCancelled.set(true);
+           // screenerCancelled.set(true);
+            cancelScreeningService();
+
             Toast.makeText(this, getString(R.string.toast_screener_cancelled), Toast.LENGTH_SHORT).show();
             return;
         }

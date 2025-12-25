@@ -55,12 +55,12 @@ dependencies {
     // 1. Yahoo Finance API (需要 JitPack 倉庫)
     //implementation("com.savoirfairey:yahoofinance-api:3.16.0")
     // 2. HTTP 客戶端 (OkHttp, Yahoo API 可能需要)
-    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    implementation(libs.okhttp)
     // 3. 圖表函式庫
-    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+    implementation(libs.mpandroidchart)
     // 4. Gson (如果您專案有用到，保留)
     implementation("com.google.code.gson:gson:2.13.2")
-    implementation("org.jsoup:jsoup:1.17.2")
+    implementation(libs.jsoup)
 
     // 測試依賴
     testImplementation(libs.junit)
