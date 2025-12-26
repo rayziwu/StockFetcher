@@ -2446,7 +2446,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         addMaLine(lineData, displayedList, "MA35", p -> p.ma35, Color.YELLOW);
         addMaLine(lineData, displayedList, "MA60", p -> p.ma60, Color.MAGENTA);
         addMaLine(lineData, displayedList, "MA120", p -> p.ma120, Color.CYAN);
-        addMaLine(lineData, displayedList, "MA200", p -> p.ma200, Color.BLUE);
+        addMaLine(lineData, displayedList, "MA200", p -> p.ma200,  Color.rgb(79, 195, 247));
         addMaLine(lineData, displayedList, "MA240", p -> p.ma240, Color.rgb(255, 165, 0));
 
         return lineData;
