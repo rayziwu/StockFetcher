@@ -74,6 +74,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private boolean screenerAutoExported = false;
     // 只要成功載入一次，就不再重複掃描股票代碼.csv
     private boolean tickerMetaLoadedOnce = false;
+    private boolean screenerReceiverRegistered = false;
     private volatile boolean isScreening = false;
     private java.util.concurrent.ExecutorService screenerExec =
             java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -154,7 +155,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
         bindViews();
         initUi();
         initCharts();
@@ -163,7 +163,22 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         fetchStockDataWithFallback(currentStockId, currentInterval,
                 getStartTimeLimit(currentInterval, isSwitchingInterval));
     }
+    private void registerScreenerReceiverOnce() {
+        if (screenerReceiverRegistered) return;
 
+        android.content.IntentFilter f = new android.content.IntentFilter();
+        f.addAction(ScreenerForegroundService.ACTION_PROGRESS);
+        f.addAction(ScreenerForegroundService.ACTION_DONE);
+        f.addAction(ScreenerForegroundService.ACTION_FAIL);
+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenerReceiver, f, android.content.Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenerReceiver, f);
+        }
+
+        screenerReceiverRegistered = true;
+    }
     @Override
     protected void onStart() {
         super.onStart();
@@ -182,8 +197,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
     @Override
     protected void onStop() {
-        try { unregisterReceiver(screenerReceiver); } catch (Exception ignored) {}
-        super.onStop();
+          super.onStop();
     }
     private void preloadTickerMetaIfCsvExists() {
         if (tickerMetaLoadedOnce) return;
@@ -758,10 +772,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     @Override
     protected void onDestroy() {
         try {
-            //screenerCancelled.set(true);
-            cancelScreeningService();
-            if (screenerFuture != null) screenerFuture.cancel(true);
-            if (screenerExec != null) screenerExec.shutdownNow();
+            if (screenerReceiverRegistered) {
+                unregisterReceiver(screenerReceiver);
+                screenerReceiverRegistered = false;
+            }
         } catch (Exception ignored) {}
         super.onDestroy();
     }
