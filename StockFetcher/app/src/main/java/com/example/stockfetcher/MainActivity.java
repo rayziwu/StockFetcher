@@ -279,8 +279,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         intervalSwitchButton.setText(displayText[currentIntervalIndex]);
 
         // view mode button：固定高度 + 初始文字 + 切換
-        viewModeButton.getLayoutParams().height =
-                (int) (24 * getResources().getDisplayMetrics().density);
+        //viewModeButton.getLayoutParams().height =
+        //        (int) (24 * getResources().getDisplayMetrics().density);
         updateViewModeButtonText();
         viewModeButton.setOnClickListener(v -> {
             currentViewModeIndex = (currentViewModeIndex + 1) % VIEW_MODES.length;
@@ -383,6 +383,16 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 }
             });
         }
+        // 股票代碼輸入格、起始日期輸入格：字體縮小 30%
+        if (stockIdEditText != null) {
+            float px = stockIdEditText.getTextSize(); // px
+            stockIdEditText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, px * 0.7f);
+        }
+
+        if (startDateEditText != null) {
+            float px = startDateEditText.getTextSize(); // px
+            startDateEditText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, px * 0.7f);
+        }
     }
     private void setControlsEnabled(boolean enabled) {
         if (intervalSwitchButton != null) intervalSwitchButton.setEnabled(enabled);
@@ -393,7 +403,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         if (startDateEditText != null) startDateEditText.setEnabled(enabled);
         if (comparisonStockIdEditText != null) comparisonStockIdEditText.setEnabled(enabled);
 
-        // 篩選按鈕保持可用（用於顯示進度/提示）
+        // 篩選按鈕保持可用（用於顯示進度/提示）fviewModeButton.getLayoutParams().height
         if (screenerButton != null) screenerButton.setEnabled(true);
     }
     private void applyIntervalForScreener(ScreenerMode mode) {

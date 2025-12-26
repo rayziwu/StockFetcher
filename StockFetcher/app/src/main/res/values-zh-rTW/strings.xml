@@ -36,9 +36,9 @@
     <string name="screener_btn">篩選</string>
     <string name="screener_title">選擇篩選條件</string>
 
-    <string name="screener_mode_lt20">1. 最近連續40個交易日 KD40 &lt; 20 + 量放大</string>
-    <string name="screener_mode_gt45">2. 連續 KD40 &gt; 45 天數：21~29 + 量放大</string>
-    <string name="screener_mode_ma60_3pct" formatted="false">3. 最近連續40日：收盤價與 MA60 相差 ±3% 以內</string>
+    <string name="screener_mode_lt20">1. KD40 &lt; 20 連續40天 ,量放大</string>
+    <string name="screener_mode_gt45">2. KD40 &gt; 45 連續21~29天,量放大</string>
+    <string name="screener_mode_ma60_3pct" formatted="false">3. 與MA60相差&lt;±3% 連續40日</string>
     <string name="screener_mode_kd9_mo_gc">4. 月K KD9 黃金交叉</string>
     <string name="screener_mode_kd9_wk_gc">5. 周K KD9 黃金交叉</string>
     <string name="screener_mode_csv_list">6. 從 CSV 讀取股票清單</string>

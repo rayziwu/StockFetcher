@@ -42,15 +42,23 @@
             <Button
                 android:id="@+id/viewModeButton"
                 android:layout_width="60dp"
-                android:layout_height="36dp"
+                android:layout_height="32dp"
+                android:minHeight="32dp"
                 android:layout_gravity="top|end"
-                android:layout_marginTop="0dp"
-                android:layout_marginEnd="0dp"
                 android:text="@string/view_mode_all"
-                android:background="#80444444"
+                android:background="@drawable/bg_btn_round"
                 android:textColor="@android:color/white"
                 android:textSize="10sp"
-                android:padding="0dp" />
+                android:gravity="center"
+                android:includeFontPadding="true"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="1dp"
+                android:paddingBottom="1dp" />
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
         </FrameLayout>
 
         <FrameLayout
@@ -70,7 +78,8 @@
                 android:layout_height="32dp"
                 android:layout_gravity="bottom|end"
                 android:layout_margin="10dp"
-                android:background="#80444444"
+                android:background="@drawable/bg_compare_edittext"
+                android:paddingBottom="6dp"
                 android:importantForAutofill="no"
                 android:autofillHints=""
                 android:hint="@string/hint_compare_symbol"
@@ -96,15 +105,18 @@
             <Button
                 android:id="@+id/indicatorModeButton"
                 android:layout_width="60dp"
-                android:layout_height="36dp"
+                android:layout_height="32dp"
+                android:minHeight="32dp"
                 android:layout_gravity="bottom|end"
-                android:layout_marginTop="20dp"
-                android:layout_marginEnd="0dp"
                 android:text="@string/indicator_macd"
-                android:background="#80444444"
+                android:background="@drawable/bg_btn_round"
                 android:textColor="@android:color/white"
                 android:textSize="10sp"
-                android:padding="0dp" />
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="1dp"
+                android:paddingBottom="1dp" />
         </FrameLayout>
 
         <LinearLayout
