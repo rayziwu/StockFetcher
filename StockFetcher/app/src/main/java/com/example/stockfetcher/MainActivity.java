@@ -924,18 +924,16 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void showIndustryPickerDialogThenStart(ScreenerMode mode, String[] industries) {
         if (industries == null) industries = new String[0];
 
-        // ✅ 先過濾掉「上市...」並產生 final items（避免 lambda 引用到非 final 的 industries）
         java.util.ArrayList<String> list = new java.util.ArrayList<>();
         for (String s : industries) {
             if (s == null) continue;
             String ind = s.trim();
             if (ind.isEmpty()) continue;
-            if (ind.startsWith("上市")) continue; // 移除「上市...」
+            if (ind.startsWith("上市")) continue;
             list.add(ind);
         }
         final String[] items = list.toArray(new String[0]);
 
-        // 沒有可選產業就直接開始（等同全市場）
         if (items.length == 0) {
             selectedIndustries.clear();
             saveSelectedIndustriesToPrefs();
@@ -947,7 +945,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         loadSelectedIndustriesFromPrefs();
 
-        // 預設：若沒選過則全選；有選過就照上次
         final boolean[] checked = new boolean[items.length];
         if (selectedIndustries.isEmpty()) {
             for (int i = 0; i < checked.length; i++) checked[i] = true;
@@ -955,20 +952,16 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             for (int i = 0; i < items.length; i++) checked[i] = selectedIndustries.contains(items[i]);
         }
 
-        // 暫存選擇（final 參考可在 lambda 中使用）
         final java.util.HashSet<String> tmp = new java.util.HashSet<>();
-        for (int i = 0; i < items.length; i++) {
-            if (checked[i]) tmp.add(items[i]);
-        }
+        for (int i = 0; i < items.length; i++) if (checked[i]) tmp.add(items[i]);
 
-        // ---- 自訂 title：標題 + [全選] [全不選] ----
+        // ---- 自訂 title：標題 + [全選(勾選)] ----
         android.widget.LinearLayout titleBar = new android.widget.LinearLayout(this);
         titleBar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         int pad = Math.round(12f * getResources().getDisplayMetrics().density);
         titleBar.setPadding(pad, pad, pad, pad);
 
         android.widget.TextView tvTitle = new android.widget.TextView(this);
-      //tvTitle.setText("選擇產業類別（可複選）");
         tvTitle.setText(getString(R.string.industry_picker_title));
         tvTitle.setTextColor(android.graphics.Color.WHITE);
         tvTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
@@ -976,32 +969,40 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 new android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         tvTitle.setLayoutParams(lpTitle);
 
-        android.widget.Button btnAll = new android.widget.Button(this);
-        //btnAll.setText("全選");
-        btnAll.setText(getString(R.string.btn_select_all));
-        android.widget.Button btnNone = new android.widget.Button(this);
-        //btnNone.setText("全不選");
-        btnNone.setText(getString(R.string.btn_select_none));
+        // 用 CheckBox 當「全選」開關
+        androidx.appcompat.widget.AppCompatCheckBox cbAll = new androidx.appcompat.widget.AppCompatCheckBox(this);
+        cbAll.setText(getString(R.string.btn_select_all)); // 文字可沿用你原本的 "全選"
+        cbAll.setTextColor(android.graphics.Color.WHITE);
+
         titleBar.addView(tvTitle);
-        titleBar.addView(btnAll);
-        titleBar.addView(btnNone);
+        titleBar.addView(cbAll);
+
+        // guard：避免我們「程式同步全選狀態」時，反過來觸發 cbAll listener 做全清/全選
+        final boolean[] suppressCbAll = new boolean[] { false };
+
+        // 初始化 cbAll 狀態：全部都勾 => cbAll 勾上，否則不勾
+        boolean initAll = (tmp.size() == items.length);
+        cbAll.setChecked(initAll);
 
         androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setCustomTitle(titleBar)
                 .setMultiChoiceItems(items, checked, (d, which, isChecked) -> {
                     String ind = items[which];
                     if (isChecked) tmp.add(ind); else tmp.remove(ind);
+
+                    // 同步「全選」狀態（但不要觸發它去清空全部）
+                    boolean allNow = (tmp.size() == items.length);
+                    suppressCbAll[0] = true;
+                    cbAll.setChecked(allNow);
+                    suppressCbAll[0] = false;
                 })
                 .setPositiveButton(android.R.string.ok, (d, w) -> {
                     selectedIndustries.clear();
                     selectedIndustries.addAll(tmp);
-
-                    // 若全不選：視為不限制產業（全市場）
                     saveSelectedIndustriesToPrefs();
 
                     if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
                     setControlsEnabled(true);
-
                     startScreening(mode);
                 })
                 .setNegativeButton(android.R.string.cancel, (d, w) -> {
@@ -1014,22 +1015,22 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         android.widget.ListView lv = dlg.getListView();
 
-        // 全選
-        btnAll.setOnClickListener(v -> {
-            tmp.clear();
-            for (int i = 0; i < items.length; i++) {
-                checked[i] = true;
-                lv.setItemChecked(i, true);
-                tmp.add(items[i]);
-            }
-        });
+        // 「全選」勾選邏輯：勾上 => 全選；取消 => 全不選
+        cbAll.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (suppressCbAll[0]) return;
 
-        // 全不選
-        btnNone.setOnClickListener(v -> {
             tmp.clear();
-            for (int i = 0; i < items.length; i++) {
-                checked[i] = false;
-                lv.setItemChecked(i, false);
+            if (isChecked) {
+                for (int i = 0; i < items.length; i++) {
+                    checked[i] = true;
+                    lv.setItemChecked(i, true);
+                    tmp.add(items[i]);
+                }
+            } else {
+                for (int i = 0; i < items.length; i++) {
+                    checked[i] = false;
+                    lv.setItemChecked(i, false);
+                }
             }
         });
     }
@@ -1984,28 +1985,32 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void drawCharts(List<StockDayPrice> fullPriceList, String symbol) {
         String mode = VIEW_MODES[currentViewModeIndex];
 
-        if (fullPriceList == null || fullPriceList.isEmpty()) {
-            Log.d(TAG, "Chart Draw Failed: fullPriceList is empty for symbol: " + symbol);
+        List<StockDayPrice> cleanedFull = OhlcCleaners.cleanOhlc(fullPriceList, currentInterval);
+        if (cleanedFull == null || cleanedFull.isEmpty()) {
             clearAllCharts("無 " + symbol + " 歷史數據可供繪製。");
             return;
         }
 
-        List<StockDayPrice> displayedList = getDisplayedList(fullPriceList);
+        calculateMACD(cleanedFull);
+        calculateKDJ(cleanedFull, currentInterval);
+        calculateVolumeProfile(cleanedFull);
+
+        List<StockDayPrice> displayedList = getDisplayedList(cleanedFull);
         if (displayedList == null || displayedList.isEmpty()) {
             Log.w(TAG, "Chart Draw Warning: displayedList is unexpectedly empty after filtering.");
             clearAllCharts(null);
             return;
         }
 
-        if (coordinateMarker == null) {
-            coordinateMarker = new CoordinateMarkerView(this, displayedList);
-            coordinateMarker.setChartView(mainChart);
-            mainChart.setMarker(coordinateMarker);
-        }
 
-        calculateKDJ(displayedList, currentInterval);
-        calculateMACD(displayedList);
-        calculateVolumeProfile(displayedList);
+        coordinateMarker = new CoordinateMarkerView(this, displayedList);
+        coordinateMarker.setChartView(mainChart);
+        mainChart.setMarker(coordinateMarker);
+
+
+      //  calculateKDJ(displayedList, currentInterval);
+      //  calculateMACD(displayedList);
+      //  calculateVolumeProfile(displayedList);
 
         MyXAxisFormatter dateFormatter = new MyXAxisFormatter(displayedList);
         mainChart.getXAxis().setValueFormatter(dateFormatter);
@@ -2083,88 +2088,160 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
 
     private void calculateKDJ(List<StockDayPrice> prices, String interval) {
-        final int M1 = 3, M2 = 3;
+        final int smoothK = 3, dPeriod = 3;
 
         final int N;
         if ("1h".equals(interval) || "1d".equals(interval)) {
             N = 40;
-            Log.d(TAG, "KD週期設定: " + interval + " 使用長週期 N=40");
         } else {
             N = 9;
-            Log.d(TAG, "KD週期設定: " + interval + " 使用標準週期 N=9");
         }
         currentKDNPeriod = N;
-        if (prices.size() < N) return;
+        if (prices == null || prices.size() < N) return;
 
-        double prevK = 50.0, prevD = 50.0;
+        int n = prices.size();
 
-        for (int i = 0; i < prices.size(); i++) {
-            if (i < N - 1) continue;
+        // 先把 kdK/kdD 清空，避免沿用舊值
+        for (StockDayPrice p : prices) {
+            p.kdK = Double.NaN;
+            p.kdD = Double.NaN;
+        }
 
-            double highestHigh = Double.NEGATIVE_INFINITY;
-            double lowestLow = Double.POSITIVE_INFINITY;
+        double[] kRaw = new double[n];
+        double[] k = new double[n];
+        double[] d = new double[n];
+
+        for (int i = 0; i < n; i++) {
+            kRaw[i] = Double.NaN;
+            k[i] = Double.NaN;
+            d[i] = Double.NaN;
+        }
+
+        // 1) RSV / %K raw
+        for (int i = N - 1; i < n; i++) {
+            double ll = Double.POSITIVE_INFINITY;
+            double hh = Double.NEGATIVE_INFINITY;
+
             for (int j = i - N + 1; j <= i; j++) {
-                highestHigh = Math.max(highestHigh, prices.get(j).getHigh());
-                lowestLow = Math.min(lowestLow, prices.get(j).getLow());
+                ll = Math.min(ll, prices.get(j).getLow());
+                hh = Math.max(hh, prices.get(j).getHigh());
             }
 
-            double close = prices.get(i).getClose();
-            double rsv = (highestHigh != lowestLow)
-                    ? ((close - lowestLow) / (highestHigh - lowestLow)) * 100.0
-                    : 50.0;
-
-            double curK = ((M1 - 1.0) / M1) * prevK + (1.0 / M1) * rsv;
-            double curD = ((M2 - 1.0) / M2) * prevD + (1.0 / M2) * curK;
-
-            prices.get(i).kdK = curK;
-            prices.get(i).kdD = curD;
-
-            prevK = curK;
-            prevD = curD;
-        }
-    }
-
-    private void calculateMACD(List<StockDayPrice> prices) {
-        final int SHORT_PERIOD = 12;
-        final int LONG_PERIOD = 26;
-        final int SIGNAL_PERIOD = 9;
-        if (prices.size() < LONG_PERIOD) return;
-
-        double[] emaShort = calculateEMA(prices, SHORT_PERIOD);
-        double[] emaLong = calculateEMA(prices, LONG_PERIOD);
-
-        for (int i = 0; i < prices.size(); i++) {
-            prices.get(i).macdDIF = (i >= LONG_PERIOD - 1) ? (emaShort[i] - emaLong[i]) : Double.NaN;
-        }
-
-        double prevDEA = 0.0;
-        final double mDEA = 2.0 / (SIGNAL_PERIOD + 1.0);
-
-        for (int i = 0; i < prices.size(); i++) {
-            double dif = prices.get(i).macdDIF;
-
-            if (Double.isNaN(dif)) {
-                prices.get(i).macdDEA = Double.NaN;
+            double denom = hh - ll;
+            if (denom <= 0) {
+                // 對齊 Python：denom==0 -> NaN（rolling mean 會讓後面也 NaN）
                 continue;
             }
-
-            if (i < LONG_PERIOD - 1 + SIGNAL_PERIOD - 1) {
-                prices.get(i).macdDEA = dif;
-                prevDEA = dif;
-            } else {
-                double dea = (dif - prevDEA) * mDEA + prevDEA;
-                prices.get(i).macdDEA = dea;
-                prevDEA = dea;
-            }
+            double close = prices.get(i).getClose();
+            kRaw[i] = 100.0 * (close - ll) / denom;
         }
 
-        for (StockDayPrice p : prices) {
-            p.macdHistogram = (!Double.isNaN(p.macdDIF) && !Double.isNaN(p.macdDEA))
-                    ? (p.macdDIF - p.macdDEA)
-                    : Double.NaN;
+        // 2) K = SMA(kRaw, 3)
+        smaStrict(kRaw, smoothK, k);
+
+        // 3) D = SMA(K, 3)
+        smaStrict(k, dPeriod, d);
+
+        // 回寫到物件
+        for (int i = 0; i < n; i++) {
+            prices.get(i).kdK = k[i];
+            prices.get(i).kdD = d[i];
         }
     }
 
+    private static void smaStrict(double[] src, int window, double[] dst) {
+        int n = src.length;
+        for (int i = 0; i < n; i++) dst[i] = Double.NaN;
+        if (window <= 0) return;
+
+        for (int i = window - 1; i < n; i++) {
+            double sum = 0.0;
+            for (int j = i - window + 1; j <= i; j++) {
+                double v = src[j];
+                if (Double.isNaN(v)) { // 只要視窗內有 NaN，就不產生值（對齊你 ScreenerEngine / 常見 rolling 行為）
+                    sum = Double.NaN;
+                    break;
+                }
+                sum += v;
+            }
+            if (!Double.isNaN(sum)) dst[i] = sum / window;
+        }
+    }
+    private void calculateMACD(List<StockDayPrice> prices) {
+        if (prices == null || prices.isEmpty()) return;
+
+        final int SHORT = 12;
+        final int LONG  = 26;
+        final int SIGNAL = 9;
+
+        // 清空舊值
+        for (StockDayPrice p : prices) {
+            p.macdDIF = Double.NaN;
+            p.macdDEA = Double.NaN;
+            p.macdHistogram = Double.NaN;
+        }
+
+        int n = prices.size();
+        double[] close = new double[n];
+        for (int i = 0; i < n; i++) close[i] = prices.get(i).getClose();
+
+        double[] ema12 = emaAdjustFalse(close, SHORT);
+        double[] ema26 = emaAdjustFalse(close, LONG);
+
+        double[] dif = new double[n];
+        for (int i = 0; i < n; i++) {
+            if (Double.isFinite(ema12[i]) && Double.isFinite(ema26[i])) {
+                dif[i] = ema12[i] - ema26[i];
+            } else {
+                dif[i] = Double.NaN;
+            }
+        }
+
+        double[] dea = emaAdjustFalse(dif, SIGNAL);
+
+        for (int i = 0; i < n; i++) {
+            prices.get(i).macdDIF = dif[i];
+            prices.get(i).macdDEA = dea[i];
+
+            // Python: Hist = DIF - Signal (沒有 *2)
+            if (Double.isFinite(dif[i]) && Double.isFinite(dea[i])) {
+                prices.get(i).macdHistogram = dif[i] - dea[i];
+            }
+        }
+    }
+
+    /**
+     * 等價於 pandas: series.ewm(span=span, adjust=False).mean()
+     * alpha = 2/(span+1)
+     * ema[t] = alpha*x[t] + (1-alpha)*ema[t-1]
+     *
+     * seed：第一個 finite 值作為 ema 起點；之前維持 NaN。
+     */
+    private static double[] emaAdjustFalse(double[] x, int span) {
+        int n = x.length;
+        double[] out = new double[n];
+        for (int i = 0; i < n; i++) out[i] = Double.NaN;
+        if (n == 0 || span <= 0) return out;
+
+        double alpha = 2.0 / (span + 1.0);
+
+        int first = -1;
+        for (int i = 0; i < n; i++) {
+            if (Double.isFinite(x[i])) { first = i; break; }
+        }
+        if (first < 0) return out;
+
+        out[first] = x[first];
+        for (int i = first + 1; i < n; i++) {
+            double xi = x[i];
+            if (!Double.isFinite(xi)) {
+                out[i] = out[i - 1]; // 你的 Close 通常不會 NaN；保守處理
+            } else {
+                out[i] = alpha * xi + (1.0 - alpha) * out[i - 1];
+            }
+        }
+        return out;
+    }
     private double[] calculateEMA(List<StockDayPrice> prices, int period) {
         double[] ema = new double[prices.size()];
         final double m = 2.0 / (period + 1.0);

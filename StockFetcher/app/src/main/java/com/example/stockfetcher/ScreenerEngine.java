@@ -106,6 +106,7 @@ public final class ScreenerEngine {
             }
 
             List<StockDayPrice> data = fetcher.fetchStockDataBlocking(info.ticker, cfg.interval, startTime);
+            data = OhlcCleaners.cleanOhlc(data, cfg.interval);
             if (data == null || data.isEmpty()) continue;
 
             // MA60 band
@@ -245,7 +246,10 @@ public final class ScreenerEngine {
     }
 
     private static ScreenerResult evalGoldenCross(TickerInfo info, List<StockDayPrice> list, int kPeriod) {
-        if (list.size() < Math.max(30, kPeriod + 10)) return null;
+        //if (list.size() < Math.max(30, kPeriod + 10)) return null;
+        //if (list.size() < (kPeriod + 3 + 3)) return null; // 只做很低的保底也行
+        list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
+        // 你的日期是 yyyy-MM-dd，字串排序可行（等同時間排序）
 
         KD kd = stochKD_SMA(list, kPeriod, 3, 3);
 
