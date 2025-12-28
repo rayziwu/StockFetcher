@@ -69,6 +69,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class MainActivity extends AppCompatActivity implements OnChartGestureListener {
 
     // MainActivity fields 新增
+    private final java.util.HashSet<String> selectedIndustries = new java.util.HashSet<>();
+    private static final String PREF_SCREEN = "screen_prefs";
+    private static final String PREF_INDUSTRIES = "selected_industries";
     private Button screenerButton;
     // 篩選完成後是否已自動存檔（避免重複寫檔）
     private boolean screenerAutoExported = false;
@@ -157,6 +160,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         setContentView(R.layout.activity_main);
         bindViews();
         initUi();
+        loadSelectedIndustriesFromPrefs();
+ //     showIndustryPickerAfterTickerListReady();
+
         initCharts();
         preloadTickerMetaIfCsvExists();
         // 程式啟動時，預設繪製
@@ -198,6 +204,63 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     @Override
     protected void onStop() {
           super.onStop();
+    }
+
+    private void showIndustryPickerAfterTickerListReady() {
+        // 你若希望每次都跳，就拿掉這行
+        if (!selectedIndustries.isEmpty()) return;
+
+        new Thread(() -> {
+            List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(getApplicationContext());
+            if (tickers == null || tickers.isEmpty()) return;
+
+            java.util.TreeSet<String> set = new java.util.TreeSet<>();
+            for (TickerInfo ti : tickers) {
+                if (ti == null) continue;
+                String ind = (ti.industry == null) ? "" : ti.industry.trim();
+                if (!ind.isEmpty()) set.add(ind);
+            }
+            final String[] items = set.toArray(new String[0]);
+            final boolean[] checked = new boolean[items.length];
+
+            // 預設全選
+            for (int i = 0; i < checked.length; i++) checked[i] = true;
+
+            runOnUiThread(() -> {
+                final java.util.HashSet<String> tmp = new java.util.HashSet<>();
+                for (String s : items) tmp.add(s);
+
+                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("選擇產業類別（可複選）")
+                        .setMultiChoiceItems(items, checked, (d, which, isChecked) -> {
+                            String ind = items[which];
+                            if (isChecked) tmp.add(ind); else tmp.remove(ind);
+                        })
+                        .setPositiveButton(android.R.string.ok, (d, w) -> {
+                            selectedIndustries.clear();
+                            selectedIndustries.addAll(tmp);
+                            // 若全取消，視為不限制（或你也可改成「不允許空集合」）
+                            saveSelectedIndustriesToPrefs();
+                        })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+            });
+        }).start();
+    }
+    private void loadSelectedIndustriesFromPrefs() {
+        try {
+            java.util.Set<String> s = getSharedPreferences(PREF_SCREEN, MODE_PRIVATE)
+                    .getStringSet(PREF_INDUSTRIES, null);
+            selectedIndustries.clear();
+            if (s != null) selectedIndustries.addAll(s);
+        } catch (Exception ignored) {}
+    }
+
+    private void saveSelectedIndustriesToPrefs() {
+        getSharedPreferences(PREF_SCREEN, MODE_PRIVATE)
+                .edit()
+                .putStringSet(PREF_INDUSTRIES, new java.util.HashSet<>(selectedIndustries))
+                .apply();
     }
     private void preloadTickerMetaIfCsvExists() {
         if (tickerMetaLoadedOnce) return;
@@ -792,6 +855,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         android.content.Intent it = new android.content.Intent(this, ScreenerForegroundService.class);
         it.setAction(ScreenerForegroundService.ACTION_START);
         it.putExtra(ScreenerForegroundService.EXTRA_MODE, mode.name());
+        it.putStringArrayListExtra(ScreenerForegroundService.EXTRA_INDUSTRIES,
+                new java.util.ArrayList<>(selectedIndustries));
+
         androidx.core.content.ContextCompat.startForegroundService(this, it);
     }
     private void showScreenerModeDialog() {
@@ -808,15 +874,164 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 .setTitle(R.string.screener_title)
                 .setItems(items, (dlg, which) -> {
                     switch (which) {
-                        case 0: startScreening(ScreenerMode.LT20); break;
-                        case 1: startScreening(ScreenerMode.GT45); break;
-                        case 2: startScreening(ScreenerMode.MA60_3PCT); break;
-                        case 3: startScreening(ScreenerMode.KD9_MO_GC); break;
-                        case 4: startScreening(ScreenerMode.KD9_WK_GC); break;
-                        case 5: openCsvListPicker(); break; // CSV list mode
+                        case 0: prepareIndustryThenStartScreening(ScreenerMode.LT20); break;
+                        case 1: prepareIndustryThenStartScreening(ScreenerMode.GT45); break;
+                        case 2: prepareIndustryThenStartScreening(ScreenerMode.MA60_3PCT); break;
+                        case 3: prepareIndustryThenStartScreening(ScreenerMode.KD9_MO_GC); break;
+                        case 4: prepareIndustryThenStartScreening(ScreenerMode.KD9_WK_GC); break;
+                        case 5: openCsvListPicker(); break;
                     }
                 })
                 .show();
+    }
+    private void prepareIndustryThenStartScreening(ScreenerMode mode) {
+        if (isScreening) return;
+
+        // 先把 UI 鎖住，避免使用者亂點（也可不鎖，看你喜好）
+        setControlsEnabled(false);
+        if (screenerButton != null) screenerButton.setText("…");
+
+        new Thread(() -> {
+            List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(getApplicationContext());
+            if (tickers == null || tickers.isEmpty()) {
+                String reasonTmp = TwTickerRepository.getLastError();
+                final String reasonFinal =
+                        (reasonTmp == null || reasonTmp.trim().isEmpty())
+                                ? getString(R.string.error_ticker_list_empty)
+                                : reasonTmp;
+
+                runOnUiThread(() -> {
+                    // 還原 UI
+                    if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
+                    setControlsEnabled(true);
+                    Toast.makeText(MainActivity.this, reasonFinal, Toast.LENGTH_LONG).show();
+                });
+                return;
+            }
+
+            // 收集產業列表（去空白、排序）
+            java.util.TreeSet<String> set = new java.util.TreeSet<>();
+            for (TickerInfo ti : tickers) {
+                if (ti == null) continue;
+                String ind = (ti.industry == null) ? "" : ti.industry.trim();
+                if (!ind.isEmpty()) set.add(ind);
+            }
+
+            final String[] items = set.toArray(new String[0]);
+            runOnUiThread(() -> showIndustryPickerDialogThenStart(mode, items));
+        }).start();
+    }
+    private void showIndustryPickerDialogThenStart(ScreenerMode mode, String[] industries) {
+        if (industries == null) industries = new String[0];
+
+        // ✅ 先過濾掉「上市...」並產生 final items（避免 lambda 引用到非 final 的 industries）
+        java.util.ArrayList<String> list = new java.util.ArrayList<>();
+        for (String s : industries) {
+            if (s == null) continue;
+            String ind = s.trim();
+            if (ind.isEmpty()) continue;
+            if (ind.startsWith("上市")) continue; // 移除「上市...」
+            list.add(ind);
+        }
+        final String[] items = list.toArray(new String[0]);
+
+        // 沒有可選產業就直接開始（等同全市場）
+        if (items.length == 0) {
+            selectedIndustries.clear();
+            saveSelectedIndustriesToPrefs();
+            if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
+            setControlsEnabled(true);
+            startScreening(mode);
+            return;
+        }
+
+        loadSelectedIndustriesFromPrefs();
+
+        // 預設：若沒選過則全選；有選過就照上次
+        final boolean[] checked = new boolean[items.length];
+        if (selectedIndustries.isEmpty()) {
+            for (int i = 0; i < checked.length; i++) checked[i] = true;
+        } else {
+            for (int i = 0; i < items.length; i++) checked[i] = selectedIndustries.contains(items[i]);
+        }
+
+        // 暫存選擇（final 參考可在 lambda 中使用）
+        final java.util.HashSet<String> tmp = new java.util.HashSet<>();
+        for (int i = 0; i < items.length; i++) {
+            if (checked[i]) tmp.add(items[i]);
+        }
+
+        // ---- 自訂 title：標題 + [全選] [全不選] ----
+        android.widget.LinearLayout titleBar = new android.widget.LinearLayout(this);
+        titleBar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        int pad = Math.round(12f * getResources().getDisplayMetrics().density);
+        titleBar.setPadding(pad, pad, pad, pad);
+
+        android.widget.TextView tvTitle = new android.widget.TextView(this);
+      //tvTitle.setText("選擇產業類別（可複選）");
+        tvTitle.setText(getString(R.string.industry_picker_title));
+        tvTitle.setTextColor(android.graphics.Color.WHITE);
+        tvTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
+        android.widget.LinearLayout.LayoutParams lpTitle =
+                new android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tvTitle.setLayoutParams(lpTitle);
+
+        android.widget.Button btnAll = new android.widget.Button(this);
+        //btnAll.setText("全選");
+        btnAll.setText(getString(R.string.btn_select_all));
+        android.widget.Button btnNone = new android.widget.Button(this);
+        //btnNone.setText("全不選");
+        btnNone.setText(getString(R.string.btn_select_none));
+        titleBar.addView(tvTitle);
+        titleBar.addView(btnAll);
+        titleBar.addView(btnNone);
+
+        androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setCustomTitle(titleBar)
+                .setMultiChoiceItems(items, checked, (d, which, isChecked) -> {
+                    String ind = items[which];
+                    if (isChecked) tmp.add(ind); else tmp.remove(ind);
+                })
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    selectedIndustries.clear();
+                    selectedIndustries.addAll(tmp);
+
+                    // 若全不選：視為不限制產業（全市場）
+                    saveSelectedIndustriesToPrefs();
+
+                    if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
+                    setControlsEnabled(true);
+
+                    startScreening(mode);
+                })
+                .setNegativeButton(android.R.string.cancel, (d, w) -> {
+                    if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
+                    setControlsEnabled(true);
+                })
+                .create();
+
+        dlg.show();
+
+        android.widget.ListView lv = dlg.getListView();
+
+        // 全選
+        btnAll.setOnClickListener(v -> {
+            tmp.clear();
+            for (int i = 0; i < items.length; i++) {
+                checked[i] = true;
+                lv.setItemChecked(i, true);
+                tmp.add(items[i]);
+            }
+        });
+
+        // 全不選
+        btnNone.setOnClickListener(v -> {
+            tmp.clear();
+            for (int i = 0; i < items.length; i++) {
+                checked[i] = false;
+                lv.setItemChecked(i, false);
+            }
+        });
     }
 
     private void onScreeningFailed(String msg) {
@@ -1968,6 +2183,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     private LineData generateKDLineData(List<StockDayPrice> displayedList) {
         final int DIM_YELLOW = Color.rgb(100, 100, 0);
+        final int SKY_BLUE = Color.rgb(79, 195, 247);
 
         LineData lineData = new LineData();
         List<Entry> kEntries = new ArrayList<>();
@@ -1990,7 +2206,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         String dLabel = String.format(Locale.US, "D%d", currentKDNPeriod);
         LineDataSet dSet = new LineDataSet(dEntries, dLabel);
-        dSet.setColor(DIM_YELLOW);
+        dSet.setColor(SKY_BLUE);
         dSet.setLineWidth(1.5f);
         dSet.setDrawCircles(false);
         dSet.setDrawValues(false);
@@ -2249,10 +2465,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         combined.setData(barData);
 
         final int DIM_YELLOW = Color.rgb(100, 100, 0);
+        final int SKY_BLUE = Color.rgb(79, 195, 247);
 
         LineData lineData = new LineData();
 
-        LineDataSet difSet = new LineDataSet(difEntries, "DIF (白)");
+        LineDataSet difSet = new LineDataSet(difEntries, "DIF");
         difSet.setColor(Color.LTGRAY);
         difSet.setLineWidth(1.5f);
         difSet.setDrawCircles(false);
@@ -2260,8 +2477,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         difSet.setAxisDependency(YAxis.AxisDependency.LEFT);
         lineData.addDataSet(difSet);
 
-        LineDataSet deaSet = new LineDataSet(deaEntries, "DEA (黃)");
-        deaSet.setColor(DIM_YELLOW);
+        LineDataSet deaSet = new LineDataSet(deaEntries, "DEA");
+        deaSet.setColor(SKY_BLUE);
         deaSet.setLineWidth(1.5f);
         deaSet.setDrawCircles(false);
         deaSet.setDrawValues(false);
@@ -2361,6 +2578,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
             final int DIM_WHITE = Color.rgb(120, 120, 120);
             final int DIM_YELLOW = Color.rgb(100, 100, 0);
+            final int SKY_BLUE = Color.rgb(79, 195, 247);
 
             String kLegendText = String.format(Locale.getDefault(), "K%d", currentKDNPeriod);
             String dLegendText = String.format(Locale.getDefault(), "D%d", currentKDNPeriod);

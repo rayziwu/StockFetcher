@@ -24,7 +24,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ScreenerForegroundService extends Service {
-
+    public static final String EXTRA_INDUSTRIES = "industries";
     public static final String ACTION_START = "com.example.stockfetcher.SCREENER_START";
     public static final String ACTION_CANCEL = "com.example.stockfetcher.SCREENER_CANCEL";
 
@@ -78,14 +78,22 @@ public class ScreenerForegroundService extends Service {
             // 先以前景通知啟動（避免新系統直接砍）
             startForeground(NOTIF_ID, buildNotif("Screening…", 0, 0));
 
-            job = exec.submit(() -> runScreening(mode));
+            java.util.ArrayList<String> inds = intent.getStringArrayListExtra(EXTRA_INDUSTRIES);
+            final java.util.HashSet<String> industries = new java.util.HashSet<>();
+            if (inds != null) {
+                for (String s : inds) {
+                    if (s != null && !s.trim().isEmpty()) industries.add(s.trim());
+                }
+            }
+
+            job = exec.submit(() -> runScreening(mode, industries));
             return START_STICKY;
         }
 
         return START_STICKY;
     }
 
-    private void runScreening(ScreenerMode mode) {
+    private void runScreening(ScreenerMode mode, java.util.HashSet<String> industries) {
         try {
             YahooFinanceFetcher fetcher = new YahooFinanceFetcher();
 
@@ -98,13 +106,28 @@ public class ScreenerForegroundService extends Service {
                 return;
             }
 
-            // 跑篩選（progress + cancel 都在 service 這邊處理）
+            // ✅ 產業過濾：用傳進來的 industries
+            if (industries != null && !industries.isEmpty()) {
+                java.util.ArrayList<TickerInfo> filtered = new java.util.ArrayList<>();
+                for (TickerInfo ti : tickers) {
+                    if (ti == null) continue;
+                    String ind = (ti.industry == null) ? "" : ti.industry.trim();
+                    if (industries.contains(ind)) filtered.add(ti);
+                }
+                tickers = filtered;
+            }
+
+            if (tickers == null || tickers.isEmpty()) {
+                sendFail("No tickers after industry filter");
+                stopSelfSafely();
+                return;
+            }
+
             List<ScreenerResult> results = ScreenerEngine.run(
                     tickers,
                     mode,
                     fetcher,
                     (done, total) -> {
-                        // 更新通知 + 廣播給 Activity
                         updateNotif(done, total);
                         sendProgress(done, total);
                     },
@@ -117,9 +140,7 @@ public class ScreenerForegroundService extends Service {
                 return;
             }
 
-            // ✅ 由 service 統一輸出 CSV（你先前對齊 Python 的 tag/欄位規則）
             File out = exportResultsToCsv(mode, results);
-
             sendDone(out == null ? "" : out.getAbsolutePath());
             stopSelfSafely();
 
@@ -228,7 +249,6 @@ public class ScreenerForegroundService extends Service {
             File dir = getExternalFilesDir(null);
             if (dir == null) return null;
 
-            String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
             String tag;
             switch (mode) {
                 case LT20: tag = "LT20"; break;
@@ -239,10 +259,10 @@ public class ScreenerForegroundService extends Service {
                 default: tag = "MODE"; break;
             }
 
-            File out = new File(dir, "TW_SCREENER_" + tag + "_" + ts + ".csv");
+            // ✅ 不加日期時間（同模式覆蓋舊檔）
+            File out = new File(dir, "TW_SCREENER_" + tag + ".csv");
 
             try (FileWriter fw = new FileWriter(out, false)) {
-                // 依模式調整欄位
                 String header;
                 if (mode == ScreenerMode.MA60_3PCT) {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose,MA_60,MA60_DiffPct\n";
