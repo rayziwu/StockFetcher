@@ -38,9 +38,9 @@
     <string name="industry_picker_title">Select industries (multi-select)</string>
     <string name="btn_select_all">Select all</string>
     <string name="btn_select_none">Select none</string>
-    <string name="screener_mode_lt20">1. KD40 &lt; 20 for 40 days, volume spike</string>
-    <string name="screener_mode_gt45">2. KD40 &gt; 45 for 21~29 days, volume spike</string>
-    <string name="screener_mode_ma60_3pct" formatted="false">3. Within ±3% of MA60 for 40 days</string>
+    <string name="screener_mode_lt20">1. KD40 &lt; __   for __ days</string>
+    <string name="screener_mode_gt45">2. KD40 &gt;__   for __~__ days</string>
+    <string name="screener_mode_ma60_3pct" formatted="false">3. Differs MA60 &lt;±__% for__ days</string>
     <string name="screener_mode_kd9_mo_gc">4. Monthly KD9 golden cross</string>
     <string name="screener_mode_kd9_wk_gc">5. Weekly KD9 golden cross</string>
     <string name="screener_mode_csv_list">6. Load a stock list from CSV</string>

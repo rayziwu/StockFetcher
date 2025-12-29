@@ -37,7 +37,15 @@ public class ScreenerForegroundService extends Service {
     public static final String EXTRA_TOTAL = "total";
     public static final String EXTRA_CSV_PATH = "csv_path";
     public static final String EXTRA_ERROR = "error";
+    public static final String EXTRA_LT_THR = "lt_thr";
+    public static final String EXTRA_LT_DAYS = "lt_days";
 
+    public static final String EXTRA_GT_THR = "gt_thr";
+    public static final String EXTRA_GT_MIN = "gt_min";
+    public static final String EXTRA_GT_MAX = "gt_max";
+
+    public static final String EXTRA_MA_BAND_PCT = "ma_band_pct";
+    public static final String EXTRA_MA_DAYS = "ma_days";
     private static final String CH_ID = "screener_channel";
     private static final int NOTIF_ID = 1001;
 
@@ -85,15 +93,40 @@ public class ScreenerForegroundService extends Service {
                     if (s != null && !s.trim().isEmpty()) industries.add(s.trim());
                 }
             }
+// [ADD] build overrides from intent
+            ScreenerEngine.Overrides ov = new ScreenerEngine.Overrides();
+            ov.ltThr = getIntOrNull(intent, EXTRA_LT_THR);
+            ov.ltDays = getIntOrNull(intent, EXTRA_LT_DAYS);
 
-            job = exec.submit(() -> runScreening(mode, industries));
+            ov.gtThr = getIntOrNull(intent, EXTRA_GT_THR);
+            ov.gtMin = getIntOrNull(intent, EXTRA_GT_MIN);
+            ov.gtMax = getIntOrNull(intent, EXTRA_GT_MAX);
+
+            ov.maBandPct = getIntOrNull(intent, EXTRA_MA_BAND_PCT);
+            ov.maDays = getIntOrNull(intent, EXTRA_MA_DAYS);
+
+// [CHANGE] pass ov into runScreening
+            job = exec.submit(() -> runScreening(mode, industries, ov));
             return START_STICKY;
         }
 
         return START_STICKY;
     }
+    // [ADD] in ScreenerForegroundService
+    @Nullable
+    private static Integer getIntOrNull(Intent it, String key) {
+        if (it == null || key == null) return null;
+        if (!it.hasExtra(key)) return null;
+        try {
+            return it.getIntExtra(key, 0);
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
-    private void runScreening(ScreenerMode mode, java.util.HashSet<String> industries) {
+    // [CHANGE]
+    private void runScreening(ScreenerMode mode, java.util.HashSet<String> industries, ScreenerEngine.Overrides ov)
+   {
         try {
             YahooFinanceFetcher fetcher = new YahooFinanceFetcher();
 
@@ -131,7 +164,8 @@ public class ScreenerForegroundService extends Service {
                         updateNotif(done, total);
                         sendProgress(done, total);
                     },
-                    () -> cancelled.get()
+                    () -> cancelled.get(),
+                    ov   // [ADD]
             );
 
             if (cancelled.get()) {

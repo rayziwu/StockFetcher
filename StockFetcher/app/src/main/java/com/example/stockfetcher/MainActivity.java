@@ -125,7 +125,22 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     private IndicatorMode indicatorMode = IndicatorMode.MACD;
     private int currentKDNPeriod = 9;
+    // [ADD] 放在 MainActivity 成員變數區
+    private int pLtThr = 20;
+    private int pLtDays = 20;
 
+    private int pGtThr = 45;
+    private int pGtMin = 20;
+    private int pGtMax = 30;
+
+    private int pMaBandPct = 3;
+    private int pMaDays = 20;
+
+    private static int clampInt(int v, int lo, int hi) {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    }
     // 三個圖表區域
     private CombinedChart mainChart, k_kdChart, indicatorChart;
     private VolumeProfileView vpView;
@@ -185,68 +200,73 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         screenerReceiverRegistered = true;
     }
+
     @Override
     protected void onStart() {
         super.onStart();
+        if (!screenerReceiverRegistered) {
+            android.content.IntentFilter f = new android.content.IntentFilter();
+            f.addAction(ScreenerForegroundService.ACTION_PROGRESS);
+            f.addAction(ScreenerForegroundService.ACTION_DONE);
+            f.addAction(ScreenerForegroundService.ACTION_FAIL);
 
-        android.content.IntentFilter f = new android.content.IntentFilter();
-        f.addAction(ScreenerForegroundService.ACTION_PROGRESS);
-        f.addAction(ScreenerForegroundService.ACTION_DONE);
-        f.addAction(ScreenerForegroundService.ACTION_FAIL);
-
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            // ✅ Android 13+ 必須指定 exported/not_exported
-            registerReceiver(screenerReceiver, f, android.content.Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(screenerReceiver, f);
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(screenerReceiver, f, android.content.Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(screenerReceiver, f);
+            }
+            screenerReceiverRegistered = true;
         }
     }
     @Override
     protected void onStop() {
-          super.onStop();
+        if (screenerReceiverRegistered) {
+            try { unregisterReceiver(screenerReceiver); } catch (Exception ignored) {}
+            screenerReceiverRegistered = false;
+        }
+        super.onStop();
     }
-
-    private void showIndustryPickerAfterTickerListReady() {
+//   private void showIndustryPickerAfterTickerListReady() {
         // 你若希望每次都跳，就拿掉這行
-        if (!selectedIndustries.isEmpty()) return;
+//       if (!selectedIndustries.isEmpty()) return;
 
-        new Thread(() -> {
-            List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(getApplicationContext());
-            if (tickers == null || tickers.isEmpty()) return;
+//        new Thread(() -> {
+//            List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(getApplicationContext());
+//            if (tickers == null || tickers.isEmpty()) return;
 
-            java.util.TreeSet<String> set = new java.util.TreeSet<>();
-            for (TickerInfo ti : tickers) {
-                if (ti == null) continue;
-                String ind = (ti.industry == null) ? "" : ti.industry.trim();
-                if (!ind.isEmpty()) set.add(ind);
-            }
-            final String[] items = set.toArray(new String[0]);
-            final boolean[] checked = new boolean[items.length];
+//            java.util.TreeSet<String> set = new java.util.TreeSet<>();
+//            for (TickerInfo ti : tickers) {
+//                if (ti == null) continue;
+//                String ind = (ti.industry == null) ? "" : ti.industry.trim();
+//                if (!ind.isEmpty()) set.add(ind);
+//            }
+//            final String[] items = set.toArray(new String[0]);
+//            final boolean[] checked = new boolean[items.length];
 
             // 預設全選
-            for (int i = 0; i < checked.length; i++) checked[i] = true;
+//            for (int i = 0; i < checked.length; i++) checked[i] = true;
 
-            runOnUiThread(() -> {
-                final java.util.HashSet<String> tmp = new java.util.HashSet<>();
-                for (String s : items) tmp.add(s);
+//            runOnUiThread(() -> {
+//                final java.util.HashSet<String> tmp = new java.util.HashSet<>();
+//                for (String s : items) tmp.add(s);
 
-                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
-                        .setTitle("選擇產業類別（可複選）")
-                        .setMultiChoiceItems(items, checked, (d, which, isChecked) -> {
-                            String ind = items[which];
-                            if (isChecked) tmp.add(ind); else tmp.remove(ind);
-                        })
-                        .setPositiveButton(android.R.string.ok, (d, w) -> {
-                            selectedIndustries.clear();
-                            selectedIndustries.addAll(tmp);
+//                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+//                        .setTitle("選擇產業類別（可複選）")
+//                        .setMultiChoiceItems(items, checked, (d, which, isChecked) -> {
+//                            String ind = items[which];
+//                            if (isChecked) tmp.add(ind); else tmp.remove(ind);
+//                        })
+//                        .setPositiveButton(android.R.string.ok, (d, w) -> {
+//                            selectedIndustries.clear();
+//                            selectedIndustries.addAll(tmp);
                             // 若全取消，視為不限制（或你也可改成「不允許空集合」）
-                            saveSelectedIndustriesToPrefs();
-                        })
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .show();
-            });
-        }).start();
-    }
+//                            saveSelectedIndustriesToPrefs();
+//                        })
+//                        .setNegativeButton(android.R.string.cancel, null)
+//                        .show();
+//            });
+//        }).start();
+  //  }
     private void loadSelectedIndustriesFromPrefs() {
         try {
             java.util.Set<String> s = getSharedPreferences(PREF_SCREEN, MODE_PRIVATE)
@@ -855,34 +875,177 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         android.content.Intent it = new android.content.Intent(this, ScreenerForegroundService.class);
         it.setAction(ScreenerForegroundService.ACTION_START);
         it.putExtra(ScreenerForegroundService.EXTRA_MODE, mode.name());
+
+        it.putExtra(ScreenerForegroundService.EXTRA_LT_THR, pendingParams.ltThr);
+        it.putExtra(ScreenerForegroundService.EXTRA_LT_DAYS, pendingParams.ltDays);
+
+        it.putExtra(ScreenerForegroundService.EXTRA_GT_THR, pendingParams.gtThr);
+        it.putExtra(ScreenerForegroundService.EXTRA_GT_MIN, pendingParams.gtMin);
+        it.putExtra(ScreenerForegroundService.EXTRA_GT_MAX, pendingParams.gtMax);
+
+        it.putExtra(ScreenerForegroundService.EXTRA_MA_BAND_PCT, pendingParams.maBandPct);
+        it.putExtra(ScreenerForegroundService.EXTRA_MA_DAYS, pendingParams.maDays);
         it.putStringArrayListExtra(ScreenerForegroundService.EXTRA_INDUSTRIES,
                 new java.util.ArrayList<>(selectedIndustries));
 
         androidx.core.content.ContextCompat.startForegroundService(this, it);
     }
     private void showScreenerModeDialog() {
-        final CharSequence[] items = new CharSequence[] {
-                getString(R.string.screener_mode_lt20),
-                getString(R.string.screener_mode_gt45),
-                getString(R.string.screener_mode_ma60_3pct),
-                getString(R.string.screener_mode_kd9_mo_gc),
-                getString(R.string.screener_mode_kd9_wk_gc),
-                getString(R.string.screener_mode_csv_list),
+        final boolean isZh = getResources().getConfiguration().getLocales().get(0)
+                .getLanguage().toLowerCase(java.util.Locale.ROOT).startsWith("zh");
+
+        final int dp6  = Math.round(6f  * getResources().getDisplayMetrics().density);
+        final int dp10 = Math.round(10f * getResources().getDisplayMetrics().density);
+        final int dp44 = Math.round(44f * getResources().getDisplayMetrics().density);
+
+        android.text.InputFilter[] twoDigits = new android.text.InputFilter[] {
+                new android.text.InputFilter.LengthFilter(2)
         };
 
-        new androidx.appcompat.app.AlertDialog.Builder(this)
+        java.util.function.Function<Integer, android.widget.EditText> mk2d = (defVal) -> {
+            android.widget.EditText e = new android.widget.EditText(this);
+            e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            e.setFilters(twoDigits);
+            e.setText(String.valueOf(defVal));
+            e.setGravity(android.view.Gravity.CENTER);
+            android.widget.LinearLayout.LayoutParams lp =
+                    new android.widget.LinearLayout.LayoutParams(dp44, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = dp6;
+            lp.rightMargin = dp6;
+            e.setLayoutParams(lp);
+            return e;
+        };
+
+        java.util.function.Function<String, android.widget.TextView> mkText = (s) -> {
+            android.widget.TextView tv = new android.widget.TextView(this);
+            tv.setText(s);
+            tv.setTextSize(16f);
+            return tv;
+        };
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setPadding(dp10, dp10, dp10, dp10);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(root);
+
+        // Row 1: KD40 < thr for N days, volume spike
+        final android.widget.EditText etLtThr  = mk2d.apply(pLtThr);
+        final android.widget.EditText etLtDays = mk2d.apply(pLtDays);
+
+        android.widget.LinearLayout row1 = new android.widget.LinearLayout(this);
+        row1.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row1.setPadding(0, dp6, 0, dp6);
+        row1.addView(mkText.apply(isZh ? "1.KD40 <" : "1.KD40 <"));
+        row1.addView(etLtThr);
+        row1.addView(mkText.apply(isZh ? "連續" : "for"));
+        row1.addView(etLtDays);
+        row1.addView(mkText.apply(isZh ? "天" : "days"));
+        row1.setClickable(true);
+
+        // Row 2: KD40 > thr for min~max days, volume spike
+        final android.widget.EditText etGtThr = mk2d.apply(pGtThr);
+        final android.widget.EditText etGtMin = mk2d.apply(pGtMin);
+        final android.widget.EditText etGtMax = mk2d.apply(pGtMax);
+
+        android.widget.LinearLayout row2 = new android.widget.LinearLayout(this);
+        row2.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row2.setPadding(0, dp6, 0, dp6);
+        row2.addView(mkText.apply(isZh ? "2.KD40 >" : "2.KD40 >"));
+        row2.addView(etGtThr);
+        row2.addView(mkText.apply(isZh ? "連續" : "for"));
+        row2.addView(etGtMin);
+        row2.addView(mkText.apply("~"));
+        row2.addView(etGtMax);
+        row2.addView(mkText.apply(isZh ? "天" : "days"));
+        row2.setClickable(true);
+
+        // Row 3: |Close-MA60| <= band% for N days
+        final android.widget.EditText etMaBand = mk2d.apply(pMaBandPct);
+        final android.widget.EditText etMaDays = mk2d.apply(pMaDays);
+
+        android.widget.LinearLayout row3 = new android.widget.LinearLayout(this);
+        row3.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row3.setPadding(0, dp6, 0, dp6);
+        row3.addView(mkText.apply(isZh ? "3. 相較MA60 <" : "3.Differs MA60<"));
+        row3.addView(etMaBand);
+        row3.addView(mkText.apply(isZh ? "% 連續" : "% for"));
+        row3.addView(etMaDays);
+        row3.addView(mkText.apply(isZh ? "天" : "days"));
+        row3.setClickable(true);
+
+        // Row 4/5/6: plain rows
+        android.widget.TextView row4 = mkText.apply(getString(R.string.screener_mode_kd9_mo_gc));
+        row4.setPadding(0, dp6, 0, dp6);
+        row4.setClickable(true);
+
+        android.widget.TextView row5 = mkText.apply(getString(R.string.screener_mode_kd9_wk_gc));
+        row5.setPadding(0, dp6, 0, dp6);
+        row5.setClickable(true);
+
+        android.widget.TextView row6 = mkText.apply(getString(R.string.screener_mode_csv_list));
+        row6.setPadding(0, dp6, 0, dp6);
+        row6.setClickable(true);
+
+        root.addView(row1);
+        root.addView(row2);
+        root.addView(row3);
+        root.addView(row4);
+        root.addView(row5);
+        root.addView(row6);
+
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.screener_title)
-                .setItems(items, (dlg, which) -> {
-                    switch (which) {
-                        case 0: prepareIndustryThenStartScreening(ScreenerMode.LT20); break;
-                        case 1: prepareIndustryThenStartScreening(ScreenerMode.GT45); break;
-                        case 2: prepareIndustryThenStartScreening(ScreenerMode.MA60_3PCT); break;
-                        case 3: prepareIndustryThenStartScreening(ScreenerMode.KD9_MO_GC); break;
-                        case 4: prepareIndustryThenStartScreening(ScreenerMode.KD9_WK_GC); break;
-                        case 5: openCsvListPicker(); break;
-                    }
-                })
-                .show();
+                .setView(sv)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+
+        java.util.function.Function<android.widget.EditText, Integer> readInt = (et) -> {
+            try {
+                String s = (et.getText() == null) ? "" : et.getText().toString().trim();
+                if (s.isEmpty()) return null;
+                return Integer.parseInt(s);
+            } catch (Exception e) {
+                return null;
+            }
+        };
+
+        row1.setOnClickListener(v -> {
+            Integer thr = readInt.apply(etLtThr);
+            Integer days = readInt.apply(etLtDays);
+            pLtThr  = clampInt(thr != null ? thr : 20, 0, 99);
+            pLtDays = clampInt(days != null ? days : 20, 1, 99);
+            dlg.dismiss();
+            prepareIndustryThenStartScreening(ScreenerMode.LT20);
+        });
+
+        row2.setOnClickListener(v -> {
+            Integer thr = readInt.apply(etGtThr);
+            Integer mn  = readInt.apply(etGtMin);
+            Integer mx  = readInt.apply(etGtMax);
+            pGtThr = clampInt(thr != null ? thr : 45, 0, 99);
+            pGtMin = clampInt(mn  != null ? mn  : 20, 1, 99);
+            pGtMax = clampInt(mx  != null ? mx  : 30, 1, 99);
+            if (pGtMin > pGtMax) { int t = pGtMin; pGtMin = pGtMax; pGtMax = t; }
+            dlg.dismiss();
+            prepareIndustryThenStartScreening(ScreenerMode.GT45);
+        });
+
+        row3.setOnClickListener(v -> {
+            Integer band = readInt.apply(etMaBand);
+            Integer days = readInt.apply(etMaDays);
+            pMaBandPct = clampInt(band != null ? band : 3, 0, 99);
+            pMaDays    = clampInt(days != null ? days : 20, 1, 99);
+            dlg.dismiss();
+            prepareIndustryThenStartScreening(ScreenerMode.MA60_3PCT);
+        });
+
+        row4.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_MO_GC); });
+        row5.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_WK_GC); });
+        row6.setOnClickListener(v -> { dlg.dismiss(); openCsvListPicker(); });
+
+        dlg.show();
     }
     private void prepareIndustryThenStartScreening(ScreenerMode mode) {
         if (isScreening) return;
@@ -963,7 +1126,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         android.widget.TextView tvTitle = new android.widget.TextView(this);
         tvTitle.setText(getString(R.string.industry_picker_title));
-        tvTitle.setTextColor(android.graphics.Color.WHITE);
+        //tvTitle.setTextColor(android.graphics.Color.WHITE);
+
         tvTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
         android.widget.LinearLayout.LayoutParams lpTitle =
                 new android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -972,7 +1136,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         // 用 CheckBox 當「全選」開關
         androidx.appcompat.widget.AppCompatCheckBox cbAll = new androidx.appcompat.widget.AppCompatCheckBox(this);
         cbAll.setText(getString(R.string.btn_select_all)); // 文字可沿用你原本的 "全選"
-        cbAll.setTextColor(android.graphics.Color.WHITE);
+       // cbAll.setTextColor(android.graphics.Color.WHITE);
 
         titleBar.addView(tvTitle);
         titleBar.addView(cbAll);
@@ -1271,6 +1435,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         if (isScreening || screenerResults.isEmpty()) return;
         showFilteredAt(screenerIndex + step, true);
     }
+
     private final android.content.BroadcastReceiver screenerReceiver =
             new android.content.BroadcastReceiver() {
                 @Override
@@ -2041,6 +2206,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         rightAxis.setAxisMinimum(0f);
 
         drawMainChartData(displayedList);
+      //  YAxis r = mainChart.getAxisRight();
+      //  Log.d(TAG, "AxisRight min=" + r.getAxisMinimum() + " max=" + r.getAxisMaximum());
+
         drawKDAndComparisonChartData(displayedList);
 
         if (indicatorMode == IndicatorMode.RSI) {
@@ -2082,10 +2250,23 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         resetKDJAndComparisonAxisLimits();
     }
-
     private List<StockDayPrice> getDisplayedList(List<StockDayPrice> fullList) {
         return fullList;
     }
+
+    private static final class ScreenerParams {
+        int ltThr = 20;   // KD40 < thr
+        int ltDays = 20;  // for N days
+
+        int gtThr = 45;   // KD40 > thr
+        int gtMin = 20;   // for N~M days
+        int gtMax = 30;
+
+        int maBandPct = 3; // |Close-MA60|/MA60 <= band%
+        int maDays = 20;   // for N days
+    }
+
+    private final ScreenerParams pendingParams = new ScreenerParams();
 
     private void calculateKDJ(List<StockDayPrice> prices, String interval) {
         final int smoothK = 3, dPeriod = 3;

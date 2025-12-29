@@ -38,9 +38,9 @@
     <string name="industry_picker_title">選擇產業類別（可複選）</string>
     <string name="btn_select_all">全選</string>
     <string name="btn_select_none">全不選</string>
-    <string name="screener_mode_lt20">1. KD40 &lt; 20 連續40天 ,量放大</string>
-    <string name="screener_mode_gt45">2. KD40 &gt; 45 連續21~29天,量放大</string>
-    <string name="screener_mode_ma60_3pct" formatted="false">3. 與MA60相差&lt;±3% 連續40日</string>
+    <string name="screener_mode_lt20">1. KD40 &lt; __ 連續__天 ,量放大</string>
+    <string name="screener_mode_gt45">2. KD40 &gt;__ 連續__~__天</string>
+    <string name="screener_mode_ma60_3pct" formatted="false">3. 相較於     MA60 &lt;±__% 連續 __ 日</string>
     <string name="screener_mode_kd9_mo_gc">4. 月K KD9 黃金交叉</string>
     <string name="screener_mode_kd9_wk_gc">5. 周K KD9 黃金交叉</string>
     <string name="screener_mode_csv_list">6. 從 CSV 讀取股票清單</string>

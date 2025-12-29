@@ -6,7 +6,18 @@ import java.util.Comparator;
 import java.util.List;
 
 public final class ScreenerEngine {
+    // [ADD] parameter overrides from UI/service
+    public static final class Overrides {
+        public Integer ltThr;      // KD40 < thr
+        public Integer ltDays;     // last N days
 
+        public Integer gtThr;      // KD40 > thr
+        public Integer gtMin;      // runMin
+        public Integer gtMax;      // runMax
+
+        public Integer maBandPct;  // ±% (e.g. 3 means 3%)
+        public Integer maDays;     // last N days
+    }
     public interface ProgressListener {
         void onProgress(int done, int total);
     }
@@ -50,13 +61,16 @@ public final class ScreenerEngine {
         public static ModeConfig forMode(ScreenerMode mode) {
             switch (mode) {
                 case LT20:
-                    return new ModeConfig("1d", 40, 20.0, true, 40, true,
+                    // [CHANGE] default N=20 (was 40)
+                    return new ModeConfig("1d", 40, 20.0, true, 20, true,
                             0, 0, false, 0, 0.0, false);
                 case GT45:
+                    // [CHANGE] default N=20~30 (was 21~29)
                     return new ModeConfig("1d", 40, 45.0, false, 0, true,
-                            21, 29, false, 0, 0.0, false);
+                            20, 30, false, 0, 0.0, false);
                 case MA60_3PCT:
-                    return new ModeConfig("1d", 0, 0.0, true, 0, false,
+                    // [CHANGE] use persistDays as MA-days default N=20
+                    return new ModeConfig("1d", 0, 0.0, true, 20, false,
                             0, 0, true, 60, 0.03, false);
                 case KD9_MO_GC:
                     return new ModeConfig("1mo", 9, 0.0, true, 0, false,
@@ -82,20 +96,37 @@ public final class ScreenerEngine {
         return cal.getTimeInMillis() / 1000L;
     }
 
+    // [ADD] new overload with overrides
     public static List<ScreenerResult> run(
             List<TickerInfo> tickers,
             ScreenerMode mode,
             YahooFinanceFetcher fetcher,
             ProgressListener progress,
-            CancelToken cancel
+            CancelToken cancel,
+            Overrides ov
     ) throws Exception {
-
         ModeConfig cfg = ModeConfig.forMode(mode);
         int total = tickers.size();
         int done = 0;
 
         List<ScreenerResult> out = new ArrayList<>();
         long startTime = getScreenerStartTimeSeconds(cfg.interval);
+
+        // resolve overrides (with sane clamps)
+        final double ltThr = (ov != null && ov.ltThr != null) ? clampD(ov.ltThr, 0, 100) : cfg.thr;
+        final int ltDays = (ov != null && ov.ltDays != null) ? clampI(ov.ltDays, 1, 400) : cfg.persistDays;
+
+        final double gtThr = (ov != null && ov.gtThr != null) ? clampD(ov.gtThr, 0, 100) : cfg.thr;
+        final int gtMin = (ov != null && ov.gtMin != null) ? clampI(ov.gtMin, 1, 400) : cfg.runMin;
+        final int gtMax = (ov != null && ov.gtMax != null) ? clampI(ov.gtMax, 1, 400) : cfg.runMax;
+
+        final double maBand = (ov != null && ov.maBandPct != null)
+                ? (clampD(ov.maBandPct, 0, 99) / 100.0)
+                : cfg.band;
+        final int maDays = (ov != null && ov.maDays != null) ? clampI(ov.maDays, 1, 400) : cfg.persistDays;
+
+        final int gtMin2 = Math.min(gtMin, gtMax);
+        final int gtMax2 = Math.max(gtMin, gtMax);
 
         for (TickerInfo info : tickers) {
             if (cancel != null && cancel.isCancelled()) break;
@@ -106,12 +137,11 @@ public final class ScreenerEngine {
             }
 
             List<StockDayPrice> data = fetcher.fetchStockDataBlocking(info.ticker, cfg.interval, startTime);
-            data = OhlcCleaners.cleanOhlc(data, cfg.interval);
             if (data == null || data.isEmpty()) continue;
 
             // MA60 band
             if (cfg.needMaBand) {
-                ScreenerResult r = evalMaBand(info, data, cfg.maWindow, cfg.band);
+                ScreenerResult r = evalMaBand(info, data, cfg.maWindow, maBand, maDays);
                 if (r != null) out.add(r);
                 continue;
             }
@@ -126,15 +156,27 @@ public final class ScreenerEngine {
             // KD + volume spike modes
             ScreenerResult r;
             if (mode == ScreenerMode.GT45) {
-                r = evalGt45(info, data, cfg.kPeriod, cfg.thr, cfg.runMin, cfg.runMax, cfg.needVolSpike);
+                r = evalGt45(info, data, cfg.kPeriod, gtThr, gtMin2, gtMax2, cfg.needVolSpike);
             } else { // LT20
-                r = evalLt20(info, data, cfg.kPeriod, cfg.thr, cfg.persistDays, cfg.wantLt, cfg.needVolSpike);
+                r = evalLt20(info, data, cfg.kPeriod, ltThr, ltDays, cfg.wantLt, cfg.needVolSpike);
             }
             if (r != null) out.add(r);
         }
 
         out.sort(Comparator.comparingDouble((ScreenerResult r) -> r.avgClose60).reversed());
         return out;
+    }
+
+    private static int clampI(int v, int lo, int hi) {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    }
+
+    private static double clampD(double v, double lo, double hi) {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
     }
 
     // ---------- helpers (對齊 Python 的 rolling KD) ----------
@@ -215,8 +257,16 @@ public final class ScreenerEngine {
 
     // ---------- evaluators (對齊 Python 規則) ----------
 
-    private static ScreenerResult evalMaBand(TickerInfo info, List<StockDayPrice> list, int maWindow, double band) {
-        int needLen = maWindow + 40 + 10;
+    // [CHANGE] add tailDays
+    private static ScreenerResult evalMaBand(
+            TickerInfo info,
+            List<StockDayPrice> list,
+            int maWindow,
+            double band,
+            int tailDays
+    ) {
+        int days = Math.max(1, tailDays);
+        int needLen = maWindow + days + 10;
         if (list.size() < needLen) return null;
 
         double[] close = new double[list.size()];
@@ -226,7 +276,8 @@ public final class ScreenerEngine {
         sma(close, maWindow, ma);
 
         int n = list.size();
-        for (int i = n - 40; i < n; i++) {
+        for (int i = n - days; i < n; i++) {
+            if (i < 0) return null;
             if (Double.isNaN(ma[i]) || ma[i] == 0.0) return null;
             double diffPct = Math.abs(close[i] - ma[i]) / ma[i];
             if (diffPct > band) return null;
