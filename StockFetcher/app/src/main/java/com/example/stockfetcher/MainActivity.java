@@ -167,6 +167,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
         applyLanguagePolicyBySystemLocale();
         if (Build.VERSION.SDK_INT >= 33) {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -175,7 +176,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 return; // 等使用者回應後再啟動篩選/Service
             }
         }
-        super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         bindViews();
         initUi();
