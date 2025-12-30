@@ -16,3 +16,17 @@
 .externalNativeBuild
 .cxx
 local.properties
+# Android Studio
+*.iml
+.gradle
+/local.properties
+/.idea
+/build
+
+# GoodSync & Logs
+_gsdata_/
+*.log
+
+# Office Docs & Backups
+*.docx
+_saved_/
