@@ -80,4 +80,9 @@
     <string name="nodata_kd_compare">KD 指標區 / 比較 K 線圖</string>
     <string name="nodata_indicator_macd">MACD 指標區</string>
     <string name="nodata_no_history">無 %1$s 歷史數據可供繪製。</string>
+    <string name="screener_params_lt20">1.KD40 &lt; %1$d 連續%2$d天, 量放大</string>
+    <string name="screener_params_gt45">2.KD40 &gt; %1$d 連續%2$d~%3$d天, 量放大</string>
+    <string name="screener_params_ma60">3.相較於 MA60 &lt;±%1$d%% 連續%2$d日</string>
+
+    <string name="dialog_screener_done_msg_with_params">%1$s\n%2$s\n筆數：%3$d</string>
 </resources>

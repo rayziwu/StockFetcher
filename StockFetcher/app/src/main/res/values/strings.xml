@@ -80,4 +80,9 @@
     <string name="nodata_kd_compare">KD panel / Comparison candlestick</string>
     <string name="nodata_indicator_macd">MACD panel</string>
     <string name="nodata_no_history">No historical data for %1$s.</string>
+    <string name="screener_params_lt20">1.KD40 &lt; %1$d for %2$d days, volume spike</string>
+    <string name="screener_params_gt45">2.KD40 &gt; %1$d for %2$d~%3$d days, volume spike</string>
+    <string name="screener_params_ma60">3.Deviates MA60 &lt;±%1$d%% for %2$d days</string>
+
+    <string name="dialog_screener_done_msg_with_params">%1$s\n%2$s\nMatches: %3$d</string>
 </resources>

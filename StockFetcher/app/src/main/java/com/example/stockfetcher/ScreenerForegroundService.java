@@ -127,6 +127,8 @@ public class ScreenerForegroundService extends Service {
     // [CHANGE]
     private void runScreening(ScreenerMode mode, java.util.HashSet<String> industries, ScreenerEngine.Overrides ov)
    {
+
+
         try {
             YahooFinanceFetcher fetcher = new YahooFinanceFetcher();
 

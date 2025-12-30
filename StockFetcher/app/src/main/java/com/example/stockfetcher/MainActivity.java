@@ -85,6 +85,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private final java.util.concurrent.atomic.AtomicBoolean screenerCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     private final List<ScreenerResult> screenerResults = new ArrayList<>();
+    private int activeLtThr = 20, activeLtDays = 20;
+    private int activeGtThr = 45, activeGtMin = 20, activeGtMax = 30;
+    private int activeMaBandPct = 3, activeMaDays = 20;
+
     private int screenerIndex = 0;
     private boolean screenerSessionClosed = true;
     private boolean allowSaveOnSwipeUp = true;
@@ -503,6 +507,18 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         // 篩選按鈕保持可用（用於顯示進度/提示）fviewModeButton.getLayoutParams().height
         if (screenerButton != null) screenerButton.setEnabled(true);
     }
+    private String getActiveParamsText(ScreenerMode mode) {
+        switch (mode) {
+            case LT20:
+                return getString(R.string.screener_params_lt20, activeLtThr, activeLtDays);
+            case GT45:
+                return getString(R.string.screener_params_gt45, activeGtThr, activeGtMin, activeGtMax);
+            case MA60_3PCT:
+                return getString(R.string.screener_params_ma60, activeMaBandPct, activeMaDays);
+            default:
+                return ""; // 其他模式不顯示參數
+        }
+    }
     private void applyIntervalForScreener(ScreenerMode mode) {
         if (mode == null) return;
 
@@ -864,7 +880,16 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
     private void startScreening(ScreenerMode mode) {
         if (isScreening) return;
+// 先記住本次篩選使用的參數（顯示結果用）
+        activeLtThr = pLtThr;
+        activeLtDays = pLtDays;
 
+        activeGtThr = pGtThr;
+        activeGtMin = pGtMin;
+        activeGtMax = pGtMax;
+
+        activeMaBandPct = pMaBandPct;
+        activeMaDays = pMaDays;
         this.screenerMode = mode;
         this.isScreening = true;
         setControlsEnabled(false);
@@ -876,15 +901,15 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         it.setAction(ScreenerForegroundService.ACTION_START);
         it.putExtra(ScreenerForegroundService.EXTRA_MODE, mode.name());
 
-        it.putExtra(ScreenerForegroundService.EXTRA_LT_THR, pendingParams.ltThr);
-        it.putExtra(ScreenerForegroundService.EXTRA_LT_DAYS, pendingParams.ltDays);
+        it.putExtra(ScreenerForegroundService.EXTRA_LT_THR, activeLtThr);
+        it.putExtra(ScreenerForegroundService.EXTRA_LT_DAYS, activeLtDays);
 
-        it.putExtra(ScreenerForegroundService.EXTRA_GT_THR, pendingParams.gtThr);
-        it.putExtra(ScreenerForegroundService.EXTRA_GT_MIN, pendingParams.gtMin);
-        it.putExtra(ScreenerForegroundService.EXTRA_GT_MAX, pendingParams.gtMax);
+        it.putExtra(ScreenerForegroundService.EXTRA_GT_THR, activeGtThr);
+        it.putExtra(ScreenerForegroundService.EXTRA_GT_MIN, activeGtMin);
+        it.putExtra(ScreenerForegroundService.EXTRA_GT_MAX, activeGtMax);
 
-        it.putExtra(ScreenerForegroundService.EXTRA_MA_BAND_PCT, pendingParams.maBandPct);
-        it.putExtra(ScreenerForegroundService.EXTRA_MA_DAYS, pendingParams.maDays);
+        it.putExtra(ScreenerForegroundService.EXTRA_MA_BAND_PCT, activeMaBandPct);
+        it.putExtra(ScreenerForegroundService.EXTRA_MA_DAYS, activeMaDays);
         it.putStringArrayListExtra(ScreenerForegroundService.EXTRA_INDUSTRIES,
                 new java.util.ArrayList<>(selectedIndustries));
 
@@ -1198,7 +1223,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         });
     }
-
+/*
     private void onScreeningFailed(String msg) {
         isScreening = false;
         screenerButton.setText(getString(R.string.screener_btn));
@@ -1206,7 +1231,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
     }
 
-    private void onScreeningDone(ScreenerMode mode, List<ScreenerResult> results) {
+
+   private void onScreeningDone(ScreenerMode mode, List<ScreenerResult> results) {
         isScreening = false;
         screenerButton.setText(getString(R.string.screener_btn));
         setControlsEnabled(true);
@@ -1235,14 +1261,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
 
 // ✅ 用 toast_screener_done（你 strings.xml 已有）
-        Toast.makeText(this,
-                getString(R.string.toast_screener_done, getScreenerModeLabel(mode), screenerResults.size()),
-                Toast.LENGTH_LONG).show();
+//        Toast.makeText(this,
+//                getString(R.string.toast_screener_done, getScreenerModeLabel(mode), screenerResults.size()),
+//                Toast.LENGTH_LONG).show();
 
-        new androidx.appcompat.app.AlertDialog.Builder(this)
+        String modeLabel = getScreenerModeLabel(screenerMode);
+        String paramsLine = getActiveParamsText(screenerMode);
+
+        String msg = paramsLine.isEmpty()
+                ? getString(R.string.dialog_screener_done_msg, modeLabel, screenerResults.size())
+                : getString(R.string.dialog_screener_done_msg_with_params, modeLabel, screenerResults.size(), paramsLine);
+
+        new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
                 .setTitle(R.string.dialog_screener_done_title)
-                .setMessage(getString(R.string.dialog_screener_done_msg,
-                        getScreenerModeLabel(mode), screenerResults.size()))
+                .setMessage(msg)
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
 
@@ -1251,6 +1283,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         showFilteredAt(0, true);
     }
+    */
+
     private void showFilteredAt(int idx, boolean forceDownload) {
         if (screenerResults.isEmpty()) return;
 
@@ -1284,6 +1318,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 return mode.name();
         }
     }
+
     private void executeFetchForFilteredTicker(String ticker, boolean forceDownload) {
         // 你現有 fetchStockDataWithFallback 本身會抓主股、再抓對比
         // 若你想要 "forceDownload"，可在 YahooFinanceFetcher 加 cache key 或提供 bypass cache。
@@ -1489,17 +1524,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                             return;
                         }
 
-                        Toast.makeText(MainActivity.this,
-                                getString(R.string.toast_screener_done, getScreenerModeLabel(screenerMode), screenerResults.size()),
-                                Toast.LENGTH_LONG).show();
+                        String modeLabel = getScreenerModeLabel(screenerMode);
+                        String paramsLine = getActiveParamsText(screenerMode);
+                        int count = screenerResults.size();
+                        String msg = (screenerMode == ScreenerMode.LT20
+                                || screenerMode == ScreenerMode.GT45
+                                || screenerMode == ScreenerMode.MA60_3PCT)
+                                ? getString(R.string.dialog_screener_done_msg_with_params, "", paramsLine, count)
+                                : getString(R.string.dialog_screener_done_msg_with_params, modeLabel, paramsLine, count);
 
                         new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
                                 .setTitle(R.string.dialog_screener_done_title)
-                                .setMessage(getString(R.string.dialog_screener_done_msg,
-                                        getScreenerModeLabel(screenerMode), screenerResults.size()))
+                                .setMessage(msg)
                                 .setPositiveButton(android.R.string.ok, null)
                                 .show();
-
                         // 對齊篩選用的 interval（你原本就有）
                         applyIntervalForScreener(screenerMode);
 
