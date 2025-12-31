@@ -166,7 +166,9 @@
                 android:paddingEnd="4dp"
                 android:paddingLeft="1dp"
                 android:paddingRight="1dp"
-                android:text="@string/interval_day" />
+                android:text="@string/interval_day"
+                android:backgroundTint="?attr/colorSurfaceVariant"
+                android:textColor="?attr/colorOnSurfaceVariant"/>
 
             <Button
                 android:id="@+id/screenerButton"
@@ -176,7 +178,9 @@
                 android:paddingLeft="1dp"
                 android:paddingRight="1dp"
                 android:text="@string/screener_btn"
-                android:imeOptions="actionDone" />
+                android:imeOptions="actionDone"
+                android:backgroundTint="?attr/colorSurfaceVariant"
+                android:textColor="?attr/colorOnSurfaceVariant"/>
         </LinearLayout>
 
     </LinearLayout>

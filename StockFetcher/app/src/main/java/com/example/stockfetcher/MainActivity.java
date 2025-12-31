@@ -230,47 +230,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
         super.onStop();
     }
-//   private void showIndustryPickerAfterTickerListReady() {
-        // 你若希望每次都跳，就拿掉這行
-//       if (!selectedIndustries.isEmpty()) return;
-
-//        new Thread(() -> {
-//            List<TickerInfo> tickers = TwTickerRepository.loadOrScrape(getApplicationContext());
-//            if (tickers == null || tickers.isEmpty()) return;
-
-//            java.util.TreeSet<String> set = new java.util.TreeSet<>();
-//            for (TickerInfo ti : tickers) {
-//                if (ti == null) continue;
-//                String ind = (ti.industry == null) ? "" : ti.industry.trim();
-//                if (!ind.isEmpty()) set.add(ind);
-//            }
-//            final String[] items = set.toArray(new String[0]);
-//            final boolean[] checked = new boolean[items.length];
-
-            // 預設全選
-//            for (int i = 0; i < checked.length; i++) checked[i] = true;
-
-//            runOnUiThread(() -> {
-//                final java.util.HashSet<String> tmp = new java.util.HashSet<>();
-//                for (String s : items) tmp.add(s);
-
-//                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
-//                        .setTitle("選擇產業類別（可複選）")
-//                        .setMultiChoiceItems(items, checked, (d, which, isChecked) -> {
-//                            String ind = items[which];
-//                            if (isChecked) tmp.add(ind); else tmp.remove(ind);
-//                        })
-//                        .setPositiveButton(android.R.string.ok, (d, w) -> {
-//                            selectedIndustries.clear();
-//                            selectedIndustries.addAll(tmp);
-                            // 若全取消，視為不限制（或你也可改成「不允許空集合」）
-//                            saveSelectedIndustriesToPrefs();
-//                        })
-//                        .setNegativeButton(android.R.string.cancel, null)
-//                        .show();
-//            });
-//        }).start();
-  //  }
     private void loadSelectedIndustriesFromPrefs() {
         try {
             java.util.Set<String> s = getSharedPreferences(PREF_SCREEN, MODE_PRIVATE)
@@ -2760,7 +2719,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         barData.setBarWidth(0.8f);
         combined.setData(barData);
 
-        final int DIM_YELLOW = Color.rgb(100, 100, 0);
+    //    final int DIM_YELLOW = Color.rgb(100, 100, 0);
         final int SKY_BLUE = Color.rgb(79, 195, 247);
 
         LineData lineData = new LineData();
@@ -2872,15 +2831,15 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         if (lineData.getDataSetCount() > 0) {
             combinedData.setData(lineData);
 
-            final int DIM_WHITE = Color.rgb(120, 120, 120);
-            final int DIM_YELLOW = Color.rgb(100, 100, 0);
+        //    final int DIM_WHITE = Color.rgb(120, 120, 120);
+        //    final int DIM_YELLOW = Color.rgb(100, 100, 0);
             final int SKY_BLUE = Color.rgb(79, 195, 247);
 
             String kLegendText = String.format(Locale.getDefault(), "K%d", currentKDNPeriod);
             String dLegendText = String.format(Locale.getDefault(), "D%d", currentKDNPeriod);
 
-            customEntries.add(new LegendEntry(kLegendText, Legend.LegendForm.LINE, 10f, 3f, null, DIM_WHITE));
-            customEntries.add(new LegendEntry(dLegendText, Legend.LegendForm.LINE, 10f, 3f, null, DIM_YELLOW));
+            customEntries.add(new LegendEntry(kLegendText, Legend.LegendForm.LINE, 10f, 3f, null, Color.LTGRAY));
+            customEntries.add(new LegendEntry(dLegendText, Legend.LegendForm.LINE, 10f, 3f, null, SKY_BLUE));
         }
 
         if (comparisonPriceList.isEmpty()) {
