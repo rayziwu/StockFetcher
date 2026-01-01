@@ -188,22 +188,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         fetchStockDataWithFallback(currentStockId, currentInterval,
                 getStartTimeLimit(currentInterval, isSwitchingInterval));
     }
-    private void registerScreenerReceiverOnce() {
-        if (screenerReceiverRegistered) return;
-
-        android.content.IntentFilter f = new android.content.IntentFilter();
-        f.addAction(ScreenerForegroundService.ACTION_PROGRESS);
-        f.addAction(ScreenerForegroundService.ACTION_DONE);
-        f.addAction(ScreenerForegroundService.ACTION_FAIL);
-
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(screenerReceiver, f, android.content.Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(screenerReceiver, f);
-        }
-
-        screenerReceiverRegistered = true;
-    }
 
     @Override
     protected void onStart() {
@@ -1182,68 +1166,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         });
     }
-/*
-    private void onScreeningFailed(String msg) {
-        isScreening = false;
-        screenerButton.setText(getString(R.string.screener_btn));
-        setControlsEnabled(true);
-        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-    }
-
-
-   private void onScreeningDone(ScreenerMode mode, List<ScreenerResult> results) {
-        isScreening = false;
-        screenerButton.setText(getString(R.string.screener_btn));
-        setControlsEnabled(true);
-
-        screenerResults.clear();
-        if (results != null) screenerResults.addAll(results);
-
-// 重置自動匯出旗標
-        screenerAutoExported = false;
-        pendingExportCsv = null;
-        screenerIndex = 0;
-        screenerSessionClosed = false;
-        allowSaveOnSwipeUp = true;
-
-        if (screenerResults.isEmpty()) {
-            Toast.makeText(this,
-                    getString(R.string.toast_screener_none, getScreenerModeLabel(mode)),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-
-// ✅ 自動匯出（只做一次）
-        if (!screenerAutoExported) {
-            exportScreenerResultsToCsv();
-            screenerAutoExported = true;
-        }
-
-// ✅ 用 toast_screener_done（你 strings.xml 已有）
-//        Toast.makeText(this,
-//                getString(R.string.toast_screener_done, getScreenerModeLabel(mode), screenerResults.size()),
-//                Toast.LENGTH_LONG).show();
-
-        String modeLabel = getScreenerModeLabel(screenerMode);
-        String paramsLine = getActiveParamsText(screenerMode);
-
-        String msg = paramsLine.isEmpty()
-                ? getString(R.string.dialog_screener_done_msg, modeLabel, screenerResults.size())
-                : getString(R.string.dialog_screener_done_msg_with_params, modeLabel, screenerResults.size(), paramsLine);
-
-        new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
-                .setTitle(R.string.dialog_screener_done_title)
-                .setMessage(msg)
-                .setPositiveButton(android.R.string.ok, null)
-                .show();
-
-        // 建議：觀看結果時切到與篩選一致的 interval（對齊 Python）
-        applyIntervalForScreener(mode);
-
-        showFilteredAt(0, true);
-    }
-    */
-
     private void showFilteredAt(int idx, boolean forceDownload) {
         if (screenerResults.isEmpty()) return;
 
@@ -1565,14 +1487,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 Toast.makeText(this, "Saved: " + pendingExportCsv, Toast.LENGTH_LONG).show();
             }
         }
-    }
-    private void askExportOnceThenCloseSession() {
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(R.string.dialog_export_title)
-                .setMessage(R.string.dialog_export_msg)
-                .setPositiveButton(R.string.btn_yes, (d, w) -> exportScreenerResultsToCsv())
-                .setNegativeButton(R.string.btn_no, null)
-                .show();
     }
     private void initCharts() {
         setupMainChart();
@@ -2420,24 +2334,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
         return out;
     }
-    private double[] calculateEMA(List<StockDayPrice> prices, int period) {
-        double[] ema = new double[prices.size()];
-        final double m = 2.0 / (period + 1.0);
-
-        double sum = 0.0;
-        for (int i = 0; i < period; i++) sum += prices.get(i).getClose();
-        if (prices.size() >= period) ema[period - 1] = sum / period;
-
-        for (int i = period; i < prices.size(); i++) {
-            ema[i] = (prices.get(i).getClose() - ema[i - 1]) * m + ema[i - 1];
-        }
-
-        for (int i = 0; i < period - 1 && i < prices.size(); i++) ema[i] = Double.NaN;
-        return ema;
-    }
-
     private LineData generateKDLineData(List<StockDayPrice> displayedList) {
-        final int DIM_YELLOW = Color.rgb(100, 100, 0);
         final int SKY_BLUE = Color.rgb(79, 195, 247);
 
         LineData lineData = new LineData();
