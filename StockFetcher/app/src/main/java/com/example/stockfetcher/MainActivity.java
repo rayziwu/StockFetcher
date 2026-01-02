@@ -71,6 +71,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     // MainActivity fields 新增
     private final java.util.HashSet<String> selectedIndustries = new java.util.HashSet<>();
     private static final String PREF_SCREEN = "screen_prefs";
+    private int pMacdDivBars = 2;
+    private String pMacdDivTf = "時";
+    private String pMacdDivSide = "底";
+    private PendingParams pendingParams = new PendingParams();
     private static final String PREF_INDUSTRIES = "selected_industries";
     private Button screenerButton;
     // 篩選完成後是否已自動存檔（避免重複寫檔）
@@ -88,6 +92,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private int activeLtThr = 20, activeLtDays = 20;
     private int activeGtThr = 45, activeGtMin = 20, activeGtMax = 30;
     private int activeMaBandPct = 3, activeMaDays = 20;
+    private int activeMacdDivBars = 2;
+    private String activeMacdDivTf = "時";
+    private String activeMacdDivSide = "底";
 
     private int screenerIndex = 0;
     private boolean screenerSessionClosed = true;
@@ -458,6 +465,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 return getString(R.string.screener_params_gt45, activeGtThr, activeGtMin, activeGtMax);
             case MA60_3PCT:
                 return getString(R.string.screener_params_ma60, activeMaBandPct, activeMaDays);
+            case MACD_DIV_RECENT:
+                return getString(R.string.screener_params_macd_div_recent,
+                        activeMacdDivBars,
+                        activeMacdDivTf,
+                        activeMacdDivSide);
             default:
                 return ""; // 其他模式不顯示參數
         }
@@ -683,115 +695,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         out.add(cur.toString());
         return out.toArray(new String[0]);
     }
-    private void exportScreenerResultsToCsv() {
-        if (screenerResults.isEmpty()) {
-            Toast.makeText(this, "Nothing to export", Toast.LENGTH_SHORT).show();
-            return;
-        }
 
-        java.io.File dir = getExternalFilesDir(null);
-        if (dir == null) {
-            Toast.makeText(this,
-                    getString(R.string.error_screen_failed, "Export dir unavailable"),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        String ts = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new java.util.Date());
-
-        // Tag 對齊 Python
-        final String tag;
-        if (screenerMode == null) {
-            tag = "MODE";
-        } else {
-            switch (screenerMode) {
-                case LT20:      tag = "LT20"; break;
-                case GT45:      tag = "GT45"; break;
-                case MA60_3PCT: tag = "MA60_3PCT_40D"; break;
-                case KD9_MO_GC: tag = "KD9_MO_GC"; break;
-                case KD9_WK_GC: tag = "KD9_WK_GC"; break;
-                default:        tag = "MODE"; break;
-            }
-        }
-
-        String filename = "TW_SCREENER_" + tag + "_" + ts + ".csv";
-        java.io.File outFile = new java.io.File(dir, filename);
-
-        try (java.io.FileWriter fw = new java.io.FileWriter(outFile, false)) {
-
-            // ===== Header (依模式變動，對齊 Python 輸出欄位概念) =====
-            String header;
-            if (screenerMode == ScreenerMode.MA60_3PCT) {
-                header = "Ticker,Name,Industry,AvgClose60,LatestClose,MA_60,MA60_DiffPct\n";
-            } else if (screenerMode == ScreenerMode.GT45) {
-                header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40,KD45_RunDays\n";
-            } else if (screenerMode == ScreenerMode.LT20) {
-                header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40\n";
-            } else if (screenerMode == ScreenerMode.KD9_MO_GC || screenerMode == ScreenerMode.KD9_WK_GC) {
-                header = "Ticker,Name,Industry,AvgClose60,LatestClose,Last_K9,Last_D9,Cross_Date\n";
-            } else {
-                // fallback：輸出完整欄位
-                header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK,LastD,RunDays,MA_60,MA60_DiffPct,Cross_Date\n";
-            }
-
-            fw.write(header);
-
-            // ===== Rows =====
-            for (ScreenerResult r : screenerResults) {
-                if (r == null) continue;
-
-                // base
-                String base =
-                        csv(r.ticker) + "," +
-                                csv(r.name) + "," +
-                                csv(r.industry) + "," +
-                                numOrEmpty(r.avgClose60) + "," +
-                                numOrEmpty(r.latestClose);
-
-                if (screenerMode == ScreenerMode.MA60_3PCT) {
-                    fw.write(base + "," +
-                            numOrEmpty(r.ma60) + "," +
-                            numOrEmpty(r.ma60DiffPct) +
-                            "\n");
-                } else if (screenerMode == ScreenerMode.GT45) {
-                    fw.write(base + "," +
-                            numOrEmpty(r.lastK) + "," +                  // LastK40
-                            (r.runDays == null ? "" : r.runDays) +
-                            "\n");
-                } else if (screenerMode == ScreenerMode.LT20) {
-                    fw.write(base + "," +
-                            numOrEmpty(r.lastK) +                         // LastK40
-                            "\n");
-                } else if (screenerMode == ScreenerMode.KD9_MO_GC || screenerMode == ScreenerMode.KD9_WK_GC) {
-                    fw.write(base + "," +
-                            numOrEmpty(r.lastK) + "," +                   // Last_K9
-                            numOrEmpty(r.lastD) + "," +                   // Last_D9
-                            csv(r.crossDate) +
-                            "\n");
-                } else {
-                    // fallback 全欄位
-                    fw.write(base + "," +
-                            numOrEmpty(r.lastK) + "," +
-                            numOrEmpty(r.lastD) + "," +
-                            (r.runDays == null ? "" : r.runDays) + "," +
-                            numOrEmpty(r.ma60) + "," +
-                            numOrEmpty(r.ma60DiffPct) + "," +
-                            csv(r.crossDate) +
-                            "\n");
-                }
-            }
-
-            pendingExportCsv = outFile.getAbsolutePath();
-            Toast.makeText(this, "Saved: " + pendingExportCsv, Toast.LENGTH_LONG).show();
-
-        } catch (Exception e) {
-            Toast.makeText(this,
-                    getString(R.string.error_screen_failed, e.getMessage()),
-                    Toast.LENGTH_LONG).show();
-        }
-    }
-
-// ---------- helpers：放在 MainActivity 內任意位置（若你已經有同名可跳過） ----------
+    // ---------- helpers：放在 MainActivity 內任意位置（若你已經有同名可跳過） ----------
 
     private String csv(String s) {
         if (s == null) return "";
@@ -833,6 +738,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         activeMaBandPct = pMaBandPct;
         activeMaDays = pMaDays;
+
+        activeMacdDivBars = pMacdDivBars;
+        activeMacdDivTf   = pMacdDivTf;
+        activeMacdDivSide = pMacdDivSide;
+
         this.screenerMode = mode;
         this.isScreening = true;
         setControlsEnabled(false);
@@ -856,6 +766,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         it.putStringArrayListExtra(ScreenerForegroundService.EXTRA_INDUSTRIES,
                 new java.util.ArrayList<>(selectedIndustries));
 
+        it.putExtra(ScreenerForegroundService.EXTRA_MACD_DIV_BARS, activeMacdDivBars);
+        it.putExtra(ScreenerForegroundService.EXTRA_MACD_DIV_TF,   activeMacdDivTf);
+        it.putExtra(ScreenerForegroundService.EXTRA_MACD_DIV_SIDE, activeMacdDivSide);
+
         androidx.core.content.ContextCompat.startForegroundService(this, it);
     }
     private void showScreenerModeDialog() {
@@ -870,25 +784,77 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 new android.text.InputFilter.LengthFilter(2)
         };
 
+        final int dp40 = Math.round(40f * getResources().getDisplayMetrics().density);
+        final int dp6v = Math.round(6f  * getResources().getDisplayMetrics().density);
+
         java.util.function.Function<Integer, android.widget.EditText> mk2d = (defVal) -> {
             android.widget.EditText e = new android.widget.EditText(this);
             e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
             e.setFilters(twoDigits);
             e.setText(String.valueOf(defVal));
+            e.setSingleLine(true);
             e.setGravity(android.view.Gravity.CENTER);
+
+            // 關鍵：不要 setMinHeight(0)，反而要保底高度 + padding
+            e.setMinHeight(dp40);
+            e.setPadding(e.getPaddingLeft(), dp6v, e.getPaddingRight(), dp6v);
+
             android.widget.LinearLayout.LayoutParams lp =
-                    new android.widget.LinearLayout.LayoutParams(dp44, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.leftMargin = dp6;
-            lp.rightMargin = dp6;
+                    new android.widget.LinearLayout.LayoutParams(dp44, dp40);
+            lp.leftMargin = dp6v;
+            lp.rightMargin = dp6v;
             e.setLayoutParams(lp);
+
             return e;
         };
-
         java.util.function.Function<String, android.widget.TextView> mkText = (s) -> {
             android.widget.TextView tv = new android.widget.TextView(this);
             tv.setText(s);
             tv.setTextSize(16f);
             return tv;
+        };
+
+        java.util.function.Function<Integer, android.widget.Spinner> mkSpinner = (arrayResId) -> {
+            android.widget.Spinner sp = new android.widget.Spinner(this);
+            android.widget.ArrayAdapter<CharSequence> ad =
+                    android.widget.ArrayAdapter.createFromResource(
+                            this, arrayResId, android.R.layout.simple_spinner_item);
+            ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            sp.setAdapter(ad);
+
+            android.widget.LinearLayout.LayoutParams lp =
+                    new android.widget.LinearLayout.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                            android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = dp6;
+            lp.rightMargin = dp6;
+            sp.setLayoutParams(lp);
+            return sp;
+        };
+
+        // 依照「你存下來的字」（可能是 時/日/周/月 或 H/D/W/M 或 1h/1d...）決定 spinner index
+        java.util.function.Function<String, Integer> tfToIndex = (v) -> {
+            if (v == null) return -1;
+            String raw = v.trim();
+            if (raw.isEmpty()) return -1;
+            String up = raw.toUpperCase(java.util.Locale.ROOT);
+
+            if ("時".equals(raw) || "H".equals(up) || "HOUR".equals(up) || "1H".equals(up) || "1h".equals(raw)) return 0;
+            if ("日".equals(raw) || "D".equals(up) || "DAY".equals(up)  || "1D".equals(up) || "1d".equals(raw)) return 1;
+            if ("周".equals(raw) || "W".equals(up) || "WEEK".equals(up) || "1WK".equals(up) || "1wk".equals(raw)) return 2;
+            if ("月".equals(raw) || "M".equals(up) || "MONTH".equals(up)|| "1MO".equals(up) || "1mo".equals(raw)) return 3;
+            return -1;
+        };
+
+        java.util.function.Function<String, Integer> sideToIndex = (v) -> {
+            if (v == null) return -1;
+            String raw = v.trim();
+            if (raw.isEmpty()) return -1;
+            String up = raw.toUpperCase(java.util.Locale.ROOT);
+
+            if ("底".equals(raw) || "B".equals(up) || "BOTTOM".equals(up)) return 0;
+            if ("頂".equals(raw) || "T".equals(up) || "TOP".equals(up)) return 1;
+            return -1;
         };
 
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
@@ -898,29 +864,29 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.addView(root);
 
-        // Row 1: KD40 < thr for N days, volume spike
+        // Row 1
         final android.widget.EditText etLtThr  = mk2d.apply(pLtThr);
         final android.widget.EditText etLtDays = mk2d.apply(pLtDays);
 
         android.widget.LinearLayout row1 = new android.widget.LinearLayout(this);
         row1.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        row1.setPadding(0, dp6, 0, dp6);
-        row1.addView(mkText.apply(isZh ? "1.KD40 <" : "1.KD40 <"));
+        row1.setPadding(0, 0, 0, 0);
+        row1.addView(mkText.apply("1.KD40 <"));
         row1.addView(etLtThr);
         row1.addView(mkText.apply(isZh ? "連續" : "for"));
         row1.addView(etLtDays);
         row1.addView(mkText.apply(isZh ? "天" : "days"));
         row1.setClickable(true);
 
-        // Row 2: KD40 > thr for min~max days, volume spike
+        // Row 2
         final android.widget.EditText etGtThr = mk2d.apply(pGtThr);
         final android.widget.EditText etGtMin = mk2d.apply(pGtMin);
         final android.widget.EditText etGtMax = mk2d.apply(pGtMax);
 
         android.widget.LinearLayout row2 = new android.widget.LinearLayout(this);
         row2.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        row2.setPadding(0, dp6, 0, dp6);
-        row2.addView(mkText.apply(isZh ? "2.KD40 >" : "2.KD40 >"));
+        row2.setPadding(0, 0, 0, 0);
+        row2.addView(mkText.apply("2.KD40 >"));
         row2.addView(etGtThr);
         row2.addView(mkText.apply(isZh ? "連續" : "for"));
         row2.addView(etGtMin);
@@ -929,32 +895,73 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row2.addView(mkText.apply(isZh ? "天" : "days"));
         row2.setClickable(true);
 
-        // Row 3: |Close-MA60| <= band% for N days
+        // Row 3
         final android.widget.EditText etMaBand = mk2d.apply(pMaBandPct);
         final android.widget.EditText etMaDays = mk2d.apply(pMaDays);
 
         android.widget.LinearLayout row3 = new android.widget.LinearLayout(this);
         row3.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        row3.setPadding(0, dp6, 0, dp6);
-        row3.addView(mkText.apply(isZh ? "3. 相較MA60 <" : "3.Differs MA60<"));
+        row3.setPadding(0, 0, 0, 0);
+        row3.addView(mkText.apply(isZh ? "3. 相較MA60 <" : "3. Differs MA60 <"));
         row3.addView(etMaBand);
-        row3.addView(mkText.apply(isZh ? "% 連續" : "% for"));
+        row3.addView(mkText.apply("%"));
+        row3.addView(mkText.apply(isZh ? "連續" : "for"));
         row3.addView(etMaDays);
         row3.addView(mkText.apply(isZh ? "天" : "days"));
         row3.setClickable(true);
 
-        // Row 4/5/6: plain rows
-        android.widget.TextView row4 = mkText.apply(getString(R.string.screener_mode_kd9_mo_gc));
+        // ✅ Row 4 (two lines)
+        final android.widget.EditText etMacdBars = mk2d.apply(pMacdDivBars);
+        final android.widget.Spinner spMacdTf = mkSpinner.apply(R.array.div_tf_items);       // zh:時日周月 / en:H D W M
+        final android.widget.Spinner spMacdSide = mkSpinner.apply(R.array.div_side_items);  // zh:底頂 / en:B T
+
+        int tfIdx = tfToIndex.apply(pMacdDivTf);
+        if (tfIdx >= 0 && tfIdx < spMacdTf.getCount()) spMacdTf.setSelection(tfIdx);
+
+        int sideIdx = sideToIndex.apply(pMacdDivSide);
+        if (sideIdx >= 0 && sideIdx < spMacdSide.getCount()) spMacdSide.setSelection(sideIdx);
+
+        android.widget.LinearLayout row4 = new android.widget.LinearLayout(this);
+        row4.setOrientation(android.widget.LinearLayout.VERTICAL);
         row4.setPadding(0, dp6, 0, dp6);
         row4.setClickable(true);
 
-        android.widget.TextView row5 = mkText.apply(getString(R.string.screener_mode_kd9_wk_gc));
+        android.widget.LinearLayout row4a = new android.widget.LinearLayout(this);
+        row4a.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+        if (isZh) {
+            row4a.addView(mkText.apply("4. 最近"));
+            row4a.addView(etMacdBars);
+            row4a.addView(mkText.apply("根"));
+            row4a.addView(spMacdTf);
+            row4a.addView(mkText.apply("K柱"));
+        } else {
+            row4a.addView(mkText.apply("4. Last"));
+            row4a.addView(etMacdBars);
+            row4a.addView(spMacdTf);
+            row4a.addView(mkText.apply("bars"));
+        }
+
+        android.widget.LinearLayout row4b = new android.widget.LinearLayout(this);
+        row4b.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row4b.addView(spMacdSide);
+        row4b.addView(mkText.apply(isZh ? "部背離" : "divergence"));
+
+        row4.addView(row4a);
+        row4.addView(row4b);
+
+        // Row 5/6/7
+        android.widget.TextView row5 = mkText.apply(getString(R.string.screener_mode_kd9_mo_gc));
         row5.setPadding(0, dp6, 0, dp6);
         row5.setClickable(true);
 
-        android.widget.TextView row6 = mkText.apply(getString(R.string.screener_mode_csv_list));
+        android.widget.TextView row6 = mkText.apply(getString(R.string.screener_mode_kd9_wk_gc));
         row6.setPadding(0, dp6, 0, dp6);
         row6.setClickable(true);
+
+        android.widget.TextView row7 = mkText.apply(getString(R.string.screener_mode_csv_list));
+        row7.setPadding(0, dp6, 0, dp6);
+        row7.setClickable(true);
 
         root.addView(row1);
         root.addView(row2);
@@ -962,6 +969,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         root.addView(row4);
         root.addView(row5);
         root.addView(row6);
+        root.addView(row7);
 
         final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.screener_title)
@@ -1009,9 +1017,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             prepareIndustryThenStartScreening(ScreenerMode.MA60_3PCT);
         });
 
-        row4.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_MO_GC); });
-        row5.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_WK_GC); });
-        row6.setOnClickListener(v -> { dlg.dismiss(); openCsvListPicker(); });
+        row4.setOnClickListener(v -> {
+            Integer bars = readInt.apply(etMacdBars);
+            pMacdDivBars = clampInt(bars != null ? bars : 2, 1, 99);
+
+            pMacdDivTf = String.valueOf(spMacdTf.getSelectedItem()).trim();       // zh:時/日/周/月, en:H/D/W/M
+            pMacdDivSide = String.valueOf(spMacdSide.getSelectedItem()).trim();  // zh:底/頂, en:B/T
+
+            dlg.dismiss();
+            prepareIndustryThenStartScreening(ScreenerMode.MACD_DIV_RECENT);
+        });
+
+        row5.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_MO_GC); });
+        row6.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_WK_GC); });
+        row7.setOnClickListener(v -> { dlg.dismiss(); openCsvListPicker(); });
 
         dlg.show();
     }
@@ -1190,7 +1209,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             case GT45:
                 return getString(R.string.screener_mode_gt45);
             case MA60_3PCT:
-                return getString(R.string.screener_mode_ma60_3pct);
+                 return getString(R.string.screener_mode_ma60_3pct);
+            case MACD_DIV_RECENT:
+                return getString(R.string.screener_params_macd_div_recent,
+                        activeMacdDivBars,
+                        activeMacdDivTf,
+                        activeMacdDivSide);
             case KD9_MO_GC:
                 return getString(R.string.screener_mode_kd9_mo_gc);
             case KD9_WK_GC:
@@ -1410,7 +1434,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         int count = screenerResults.size();
                         String msg = (screenerMode == ScreenerMode.LT20
                                 || screenerMode == ScreenerMode.GT45
-                                || screenerMode == ScreenerMode.MA60_3PCT)
+                                || screenerMode == ScreenerMode.MA60_3PCT
+                                || screenerMode == ScreenerMode.MACD_DIV_RECENT)
                                 ? getString(R.string.dialog_screener_done_msg_with_params, "", paramsLine, count)
                                 : getString(R.string.dialog_screener_done_msg_with_params, modeLabel, paramsLine, count);
 
@@ -1726,10 +1751,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             @Override
             public void onError(String errorMessage) {
                 Log.e(TAG, baseSymbol + " 載入失敗: " + errorMessage);
-                clearAllCharts(getString(R.string.error_load_failed, baseSymbol));
+                clearAllCharts(getString(R.string.error_load_failed, baseSymbol, errorMessage));
                 runOnUiThread(() ->
                         Toast.makeText(MainActivity.this,
-                                getString(R.string.error_load_failed, baseSymbol),
+                                getString(R.string.error_load_failed, baseSymbol, errorMessage),
                                 Toast.LENGTH_LONG).show()
                 );
             }
@@ -2177,8 +2202,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         int maDays = 20;   // for N days
     }
 
-    private final ScreenerParams pendingParams = new ScreenerParams();
-
     private void calculateKDJ(List<StockDayPrice> prices, String interval) {
         final int smoothK = 3, dPeriod = 3;
 
@@ -2259,81 +2282,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             if (!Double.isNaN(sum)) dst[i] = sum / window;
         }
     }
+
     private void calculateMACD(List<StockDayPrice> prices) {
-        if (prices == null || prices.isEmpty()) return;
-
-        final int SHORT = 12;
-        final int LONG  = 26;
-        final int SIGNAL = 9;
-
-        // 清空舊值
-        for (StockDayPrice p : prices) {
-            p.macdDIF = Double.NaN;
-            p.macdDEA = Double.NaN;
-            p.macdHistogram = Double.NaN;
-        }
-
-        int n = prices.size();
-        double[] close = new double[n];
-        for (int i = 0; i < n; i++) close[i] = prices.get(i).getClose();
-
-        double[] ema12 = emaAdjustFalse(close, SHORT);
-        double[] ema26 = emaAdjustFalse(close, LONG);
-
-        double[] dif = new double[n];
-        for (int i = 0; i < n; i++) {
-            if (Double.isFinite(ema12[i]) && Double.isFinite(ema26[i])) {
-                dif[i] = ema12[i] - ema26[i];
-            } else {
-                dif[i] = Double.NaN;
-            }
-        }
-
-        double[] dea = emaAdjustFalse(dif, SIGNAL);
-
-        for (int i = 0; i < n; i++) {
-            prices.get(i).macdDIF = dif[i];
-            prices.get(i).macdDEA = dea[i];
-
-            // Python: Hist = DIF - Signal (沒有 *2)
-            if (Double.isFinite(dif[i]) && Double.isFinite(dea[i])) {
-                prices.get(i).macdHistogram = dif[i] - dea[i];
-            }
-        }
+        MacdCalculator.calculateMACD(prices);
     }
 
-    /**
-     * 等價於 pandas: series.ewm(span=span, adjust=False).mean()
-     * alpha = 2/(span+1)
-     * ema[t] = alpha*x[t] + (1-alpha)*ema[t-1]
-     *
-     * seed：第一個 finite 值作為 ema 起點；之前維持 NaN。
-     */
-    private static double[] emaAdjustFalse(double[] x, int span) {
-        int n = x.length;
-        double[] out = new double[n];
-        for (int i = 0; i < n; i++) out[i] = Double.NaN;
-        if (n == 0 || span <= 0) return out;
-
-        double alpha = 2.0 / (span + 1.0);
-
-        int first = -1;
-        for (int i = 0; i < n; i++) {
-            if (Double.isFinite(x[i])) { first = i; break; }
-        }
-        if (first < 0) return out;
-
-        out[first] = x[first];
-        for (int i = first + 1; i < n; i++) {
-            double xi = x[i];
-            if (!Double.isFinite(xi)) {
-                out[i] = out[i - 1]; // 你的 Close 通常不會 NaN；保守處理
-            } else {
-                out[i] = alpha * xi + (1.0 - alpha) * out[i - 1];
-            }
-        }
-        return out;
-    }
     private LineData generateKDLineData(List<StockDayPrice> displayedList) {
         final int SKY_BLUE = Color.rgb(79, 195, 247);
 
@@ -2461,31 +2414,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             float yRange = mainChart.getAxisLeft().getAxisMaximum() - mainChart.getAxisLeft().getAxisMinimum();
             float offset = yRange * 0.015f;
 
-            for (int i = 5; i < displayedList.size() - 2; i++) {
-                if (isLocalHigh(displayedList, i)) {
-                    int prevH = findPreviousLocalHigh(displayedList, i);
-                    if (prevH != -1) {
-                        double curP = displayedList.get(i).getHigh();
-                        double preP = displayedList.get(prevH).getHigh();
-                        if (curP > preP && displayedList.get(i).macdDIF < displayedList.get(prevH).macdDIF)
-                            difDown.add(new Entry(i, (float) curP + offset));
-                        if (curP > preP && displayedList.get(i).macdHistogram < displayedList.get(prevH).macdHistogram
-                                && displayedList.get(i).macdHistogram > 0)
-                            histoDown.add(new Entry(i, (float) curP + offset));
-                    }
-                }
-                if (isLocalLow(displayedList, i)) {
-                    int prevL = findPreviousLocalLow(displayedList, i);
-                    if (prevL != -1) {
-                        double curP = displayedList.get(i).getLow();
-                        double preP = displayedList.get(prevL).getLow();
-                        if (curP < preP && displayedList.get(i).macdDIF > displayedList.get(prevL).macdDIF)
-                            difUp.add(new Entry(i, (float) curP - offset));
-                        if (curP < preP && displayedList.get(i).macdHistogram > displayedList.get(prevL).macdHistogram
-                                && displayedList.get(i).macdHistogram < 0)
-                            histoUp.add(new Entry(i, (float) curP - offset));
-                    }
-                }
+            // ✅ 改成共用函式：畫圖與篩選用同一套背離判斷
+            MacdDivergenceUtil.Result div = MacdDivergenceUtil.compute(displayedList);
+
+            for (int idx : div.difBottom) {
+                difUp.add(new Entry(idx, (float) displayedList.get(idx).getLow() - offset));
+            }
+            for (int idx : div.difTop) {
+                difDown.add(new Entry(idx, (float) displayedList.get(idx).getHigh() + offset));
+            }
+            for (int idx : div.histBottom) {
+                histoUp.add(new Entry(idx, (float) displayedList.get(idx).getLow() - offset));
+            }
+            for (int idx : div.histTop) {
+                histoDown.add(new Entry(idx, (float) displayedList.get(idx).getHigh() + offset));
             }
 
             addScatterDataSet(scatterData, difUp, goldColor, 0, smallSize);
@@ -2502,7 +2444,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         Legend legend = mainChart.getLegend();
         List<LegendEntry> customEntries = new ArrayList<>();
 
-// 只在主圖有畫 K/MA 時才顯示（你原本就是這樣）
+        // 只在主圖有畫 K/MA 時才顯示（你原本就是這樣）
         if ((mode.equals("ALL") || mode.equals("K")) && data.getLineData() != null) {
 
             // 取出「目前真的畫在主圖上的兩條 MA 線」的 dataset（依你現況就是兩條）
@@ -3194,6 +3136,22 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         indicatorChart.notifyDataSetChanged();
     }
 
+    public static class PendingParams {
+        public int ltThr = 20;
+        public int ltDays = 20;
+
+        public int gtThr = 45;
+        public int gtMin = 20;
+        public int gtMax = 30;
+
+        public int maBandPct = 3;
+        public int maDays = 20;
+
+        // ✅ 新增：MACD 背離參數（預設值）
+        public int macdDivBars = 2;
+        public String macdDivTf = "時";     // 或 "HOUR"
+        public String macdDivSide = "底";   // 或 "BOTTOM"
+    }
     // Scatter shape renderers
     public static class CustomAsteriskRenderer implements com.github.mikephil.charting.renderer.scatter.IShapeRenderer {
         @Override

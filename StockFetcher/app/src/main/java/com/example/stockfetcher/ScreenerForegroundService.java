@@ -8,16 +8,14 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
 import java.io.File;
 import java.io.FileWriter;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -37,6 +35,7 @@ public class ScreenerForegroundService extends Service {
     public static final String EXTRA_TOTAL = "total";
     public static final String EXTRA_CSV_PATH = "csv_path";
     public static final String EXTRA_ERROR = "error";
+
     public static final String EXTRA_LT_THR = "lt_thr";
     public static final String EXTRA_LT_DAYS = "lt_days";
 
@@ -46,6 +45,12 @@ public class ScreenerForegroundService extends Service {
 
     public static final String EXTRA_MA_BAND_PCT = "ma_band_pct";
     public static final String EXTRA_MA_DAYS = "ma_days";
+
+    // ✅ [ADD] MACD divergence recent params
+    public static final String EXTRA_MACD_DIV_BARS = "macd_div_bars";   // int
+    public static final String EXTRA_MACD_DIV_TF   = "macd_div_tf";     // String: "時/日/周/月" or "HOUR/DAY/WEEK/MONTH"
+    public static final String EXTRA_MACD_DIV_SIDE = "macd_div_side";   // String: "底/頂" or "BOTTOM/TOP"
+
     private static final String CH_ID = "screener_channel";
     private static final int NOTIF_ID = 1001;
 
@@ -93,8 +98,10 @@ public class ScreenerForegroundService extends Service {
                     if (s != null && !s.trim().isEmpty()) industries.add(s.trim());
                 }
             }
-// [ADD] build overrides from intent
+
+            // build overrides from intent
             ScreenerEngine.Overrides ov = new ScreenerEngine.Overrides();
+
             ov.ltThr = getIntOrNull(intent, EXTRA_LT_THR);
             ov.ltDays = getIntOrNull(intent, EXTRA_LT_DAYS);
 
@@ -105,30 +112,63 @@ public class ScreenerForegroundService extends Service {
             ov.maBandPct = getIntOrNull(intent, EXTRA_MA_BAND_PCT);
             ov.maDays = getIntOrNull(intent, EXTRA_MA_DAYS);
 
-// [CHANGE] pass ov into runScreening
+            // ✅ [ADD] MACD divergence overrides
+            ov.macdDivBars = getIntOrNull(intent, EXTRA_MACD_DIV_BARS);
+            ov.macdDivTf = getTrimmedStringOrNull(intent, EXTRA_MACD_DIV_TF);
+            ov.macdDivSide = getTrimmedStringOrNull(intent, EXTRA_MACD_DIV_SIDE);
+
+            Log.d("ScreenerSvc", "mode=" + mode
+                    + " ov.ltThr=" + ov.ltThr + " ov.ltDays=" + ov.ltDays
+                    + " ov.gtThr=" + ov.gtThr + " ov.gtMin=" + ov.gtMin + " ov.gtMax=" + ov.gtMax
+                    + " ov.maBandPct=" + ov.maBandPct + " ov.maDays=" + ov.maDays
+                    + " ov.macdDivBars=" + ov.macdDivBars + " ov.macdDivTf=" + ov.macdDivTf + " ov.macdDivSide=" + ov.macdDivSide);
+
             job = exec.submit(() -> runScreening(mode, industries, ov));
             return START_STICKY;
         }
 
         return START_STICKY;
     }
-    // [ADD] in ScreenerForegroundService
+
+    @Nullable
+    private static String getTrimmedStringOrNull(Intent it, String key) {
+        if (it == null || key == null) return null;
+        if (!it.hasExtra(key)) return null;
+        try {
+            String s = it.getStringExtra(key);
+            if (s == null) return null;
+            s = s.trim();
+            return s.isEmpty() ? null : s;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ✅ 更耐用：支援 int/long/string 形式的 extra
     @Nullable
     private static Integer getIntOrNull(Intent it, String key) {
         if (it == null || key == null) return null;
         if (!it.hasExtra(key)) return null;
         try {
+            Object v = (it.getExtras() == null) ? null : it.getExtras().get(key);
+            if (v == null) return null;
+
+            if (v instanceof Integer) return (Integer) v;
+            if (v instanceof Long) return ((Long) v).intValue();
+            if (v instanceof String) {
+                String s = ((String) v).trim();
+                if (s.isEmpty()) return null;
+                return Integer.parseInt(s);
+            }
+
+            // fallback: 嘗試 getIntExtra
             return it.getIntExtra(key, 0);
         } catch (Exception e) {
             return null;
         }
     }
 
-    // [CHANGE]
-    private void runScreening(ScreenerMode mode, java.util.HashSet<String> industries, ScreenerEngine.Overrides ov)
-   {
-
-
+    private void runScreening(ScreenerMode mode, java.util.HashSet<String> industries, ScreenerEngine.Overrides ov) {
         try {
             YahooFinanceFetcher fetcher = new YahooFinanceFetcher();
 
@@ -141,7 +181,7 @@ public class ScreenerForegroundService extends Service {
                 return;
             }
 
-            // ✅ 產業過濾：用傳進來的 industries
+            // 產業過濾：用傳進來的 industries
             if (industries != null && !industries.isEmpty()) {
                 java.util.ArrayList<TickerInfo> filtered = new java.util.ArrayList<>();
                 for (TickerInfo ti : tickers) {
@@ -167,7 +207,7 @@ public class ScreenerForegroundService extends Service {
                         sendProgress(done, total);
                     },
                     () -> cancelled.get(),
-                    ov   // [ADD]
+                    ov
             );
 
             if (cancelled.get()) {
@@ -278,7 +318,7 @@ public class ScreenerForegroundService extends Service {
     @Nullable @Override
     public IBinder onBind(Intent intent) { return null; }
 
-    // -------- CSV export：沿用你先前 Python tag/欄位邏輯（簡化版，可再對齊你的 MainActivity export） --------
+    // -------- CSV export --------
     @Nullable
     private File exportResultsToCsv(ScreenerMode mode, List<ScreenerResult> results) {
         try {
@@ -290,12 +330,12 @@ public class ScreenerForegroundService extends Service {
                 case LT20: tag = "LT20"; break;
                 case GT45: tag = "GT45"; break;
                 case MA60_3PCT: tag = "MA60_3PCT_40D"; break;
+                case MACD_DIV_RECENT: tag = "MACD_DIV_RECENT"; break; // ✅ 新增
                 case KD9_MO_GC: tag = "KD9_MO_GC"; break;
                 case KD9_WK_GC: tag = "KD9_WK_GC"; break;
                 default: tag = "MODE"; break;
             }
 
-            // ✅ 不加日期時間（同模式覆蓋舊檔）
             File out = new File(dir, "TW_SCREENER_" + tag + ".csv");
 
             try (FileWriter fw = new FileWriter(out, false)) {
@@ -340,6 +380,12 @@ public class ScreenerForegroundService extends Service {
         if (!q) return s;
         return "\"" + s.replace("\"", "\"\"") + "\"";
     }
-    private String num(double v) { return (Double.isNaN(v) || Double.isInfinite(v)) ? "" : String.valueOf(v); }
-    private String numObj(Double v) { return (v == null || Double.isNaN(v) || Double.isInfinite(v)) ? "" : String.valueOf(v); }
+
+    private String num(double v) {
+        return (Double.isNaN(v) || Double.isInfinite(v)) ? "" : String.valueOf(v);
+    }
+
+    private String numObj(Double v) {
+        return (v == null || Double.isNaN(v) || Double.isInfinite(v)) ? "" : String.valueOf(v);
+    }
 }

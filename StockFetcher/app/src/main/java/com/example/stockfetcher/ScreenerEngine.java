@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 
 public final class ScreenerEngine {
+
     // [ADD] parameter overrides from UI/service
     public static final class Overrides {
         public Integer ltThr;      // KD40 < thr
@@ -17,7 +18,13 @@ public final class ScreenerEngine {
 
         public Integer maBandPct;  // ±% (e.g. 3 means 3%)
         public Integer maDays;     // last N days
+
+        // ✅ [ADD] MACD divergence recent
+        public Integer macdDivBars;   // recent N bars, default 2
+        public String  macdDivTf;     // timeframe: "HOUR/DAY/WEEK/MONTH" (or "時/日/周/月", or "1h/1d/1wk/1mo")
+        public String  macdDivSide;   // "BOTTOM/TOP" (or "底/頂")
     }
+
     public interface ProgressListener {
         void onProgress(int done, int total);
     }
@@ -27,7 +34,7 @@ public final class ScreenerEngine {
     }
 
     public static final class ModeConfig {
-        public final String interval; // "1d","1wk","1mo"
+        public final String interval; // "1h","1d","1wk","1mo"
         public final int kPeriod;
         public final double thr;
         public final boolean wantLt;
@@ -64,20 +71,31 @@ public final class ScreenerEngine {
                     // [CHANGE] default N=20 (was 40)
                     return new ModeConfig("1d", 40, 20.0, true, 20, true,
                             0, 0, false, 0, 0.0, false);
+
                 case GT45:
                     // [CHANGE] default N=20~30 (was 21~29)
                     return new ModeConfig("1d", 40, 45.0, false, 0, true,
                             20, 30, false, 0, 0.0, false);
+
                 case MA60_3PCT:
                     // [CHANGE] use persistDays as MA-days default N=20
                     return new ModeConfig("1d", 0, 0.0, true, 20, false,
                             0, 0, true, 60, 0.03, false);
+
+                // ✅ 新增第4項：最近N根(時/日/周/月)K柱，底/頂部DIF/Hist背離
+                case MACD_DIV_RECENT:
+                    // 預設用 1h（會依 overrides.macdDivTf 覆寫）
+                    return new ModeConfig("1h", 0, 0.0, true, 0, false,
+                            0, 0, false, 0, 0.0, false);
+
                 case KD9_MO_GC:
                     return new ModeConfig("1mo", 9, 0.0, true, 0, false,
                             0, 0, false, 0, 0.0, true);
+
                 case KD9_WK_GC:
                     return new ModeConfig("1wk", 9, 0.0, true, 0, false,
                             0, 0, false, 0, 0.0, true);
+
                 default:
                     throw new IllegalArgumentException("Unsupported mode: " + mode);
             }
@@ -85,9 +103,11 @@ public final class ScreenerEngine {
     }
 
     // 對齊 Python：日線約 1100 天、週線 10 年、月線 20 年
+    // ✅ [ADD] 1h：抓近 ~400 天（你可自行調整）
     public static long getScreenerStartTimeSeconds(String interval) {
         Calendar cal = Calendar.getInstance();
         switch (interval) {
+            case "1h":  cal.add(Calendar.DAY_OF_YEAR, -400); break;
             case "1d":  cal.add(Calendar.DAY_OF_YEAR, -1100); break;
             case "1wk": cal.add(Calendar.YEAR, -10); break;
             case "1mo": cal.add(Calendar.YEAR, -20); break;
@@ -105,12 +125,20 @@ public final class ScreenerEngine {
             CancelToken cancel,
             Overrides ov
     ) throws Exception {
+
         ModeConfig cfg = ModeConfig.forMode(mode);
+
+        // ✅ interval 可能被 MACD divergence 的 timeframe 參數覆寫
+        String interval = cfg.interval;
+        if (mode == ScreenerMode.MACD_DIV_RECENT) {
+            interval = resolveMacdDivInterval(ov);
+        }
+
         int total = tickers.size();
         int done = 0;
 
         List<ScreenerResult> out = new ArrayList<>();
-        long startTime = getScreenerStartTimeSeconds(cfg.interval);
+        long startTime = getScreenerStartTimeSeconds(interval);
 
         // resolve overrides (with sane clamps)
         final double ltThr = (ov != null && ov.ltThr != null) ? clampD(ov.ltThr, 0, 100) : cfg.thr;
@@ -128,6 +156,10 @@ public final class ScreenerEngine {
         final int gtMin2 = Math.min(gtMin, gtMax);
         final int gtMax2 = Math.max(gtMin, gtMax);
 
+        // ✅ MACD divergence params
+        final int macdBars = (ov != null && ov.macdDivBars != null) ? clampI(ov.macdDivBars, 1, 50) : 2;
+        final MacdDivergenceUtil.Side macdSide = resolveMacdDivSide(ov);
+
         for (TickerInfo info : tickers) {
             if (cancel != null && cancel.isCancelled()) break;
 
@@ -136,8 +168,16 @@ public final class ScreenerEngine {
                 progress.onProgress(done, total);
             }
 
-            List<StockDayPrice> data = fetcher.fetchStockDataBlocking(info.ticker, cfg.interval, startTime);
+            // ✅ 用 interval（MACD divergence 可能是 1h/1d/1wk/1mo）
+            List<StockDayPrice> data = fetcher.fetchStockDataBlocking(info.ticker, interval, startTime);
             if (data == null || data.isEmpty()) continue;
+
+            // ✅ 第4項：MACD 背離（DIF/Hist 任一成立）
+            if (mode == ScreenerMode.MACD_DIV_RECENT) {
+                ScreenerResult r = evalMacdDivRecent(info, data, macdBars, macdSide);
+                if (r != null) out.add(r);
+                continue;
+            }
 
             // MA60 band
             if (cfg.needMaBand) {
@@ -177,6 +217,69 @@ public final class ScreenerEngine {
         if (v < lo) return lo;
         if (v > hi) return hi;
         return v;
+    }
+
+    // ✅ 解析 MACD divergence timeframe -> fetch interval
+    private static String resolveMacdDivInterval(Overrides ov) {
+        String tf = (ov == null) ? null : ov.macdDivTf;
+        if (tf == null) return "1h";
+        tf = tf.trim();
+
+        // 支援：HOUR/DAY/WEEK/MONTH、1h/1d/1wk/1mo、以及 時/日/周/月
+        switch (tf) {
+            case "HOUR":
+            case "Hour":
+            case "hour":
+            case "1h":
+            case "時":
+                return "1h";
+
+            case "DAY":
+            case "Day":
+            case "day":
+            case "1d":
+            case "日":
+                return "1d";
+
+            case "WEEK":
+            case "Week":
+            case "week":
+            case "1wk":
+            case "周":
+                return "1wk";
+
+            case "MONTH":
+            case "Month":
+            case "month":
+            case "1mo":
+            case "月":
+                return "1mo";
+
+            default:
+                return "1h";
+        }
+    }
+
+    // ✅ 解析 MACD divergence side
+    private static MacdDivergenceUtil.Side resolveMacdDivSide(Overrides ov) {
+        String s = (ov == null) ? null : ov.macdDivSide;
+        if (s == null) return MacdDivergenceUtil.Side.BOTTOM;
+        s = s.trim();
+
+        switch (s) {
+            case "TOP":
+            case "Top":
+            case "top":
+            case "頂":
+                return MacdDivergenceUtil.Side.TOP;
+
+            case "BOTTOM":
+            case "Bottom":
+            case "bottom":
+            case "底":
+            default:
+                return MacdDivergenceUtil.Side.BOTTOM;
+        }
     }
 
     // ---------- helpers (對齊 Python 的 rolling KD) ----------
@@ -257,6 +360,33 @@ public final class ScreenerEngine {
 
     // ---------- evaluators (對齊 Python 規則) ----------
 
+    private static ScreenerResult evalMacdDivRecent(
+            TickerInfo info,
+            List<StockDayPrice> list,
+            int lastBars,
+            MacdDivergenceUtil.Side side
+    ) {
+        // 背離偵測會回看到前 35 根 + local high/low 的鄰近，資料太短意義不大
+        if (list == null || list.size() < 60) return null;
+
+        // 保險：按日期排序（你資料 yyyy-MM-dd，字串排序可行；若 1h 資料日期格式不同也至少保持穩定）
+        list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
+
+        MacdCalculator.calculateMACD(list);
+
+        MacdDivergenceUtil.Result div = MacdDivergenceUtil.compute(list);
+        boolean ok = div.hasInLastBars(list.size(), lastBars, side);
+        if (!ok) return null;
+
+        int n = list.size();
+        return new ScreenerResult(
+                info.ticker, info.name, info.industry,
+                avgCloseLastN(list, 60), list.get(n - 1).getClose(),
+                null, null, null,
+                null, null, null
+        );
+    }
+
     // [CHANGE] add tailDays
     private static ScreenerResult evalMaBand(
             TickerInfo info,
@@ -297,11 +427,7 @@ public final class ScreenerEngine {
     }
 
     private static ScreenerResult evalGoldenCross(TickerInfo info, List<StockDayPrice> list, int kPeriod) {
-        //if (list.size() < Math.max(30, kPeriod + 10)) return null;
-        //if (list.size() < (kPeriod + 3 + 3)) return null; // 只做很低的保底也行
         list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
-        // 你的日期是 yyyy-MM-dd，字串排序可行（等同時間排序）
-
         KD kd = stochKD_SMA(list, kPeriod, 3, 3);
 
         int n = list.size();
@@ -317,7 +443,7 @@ public final class ScreenerEngine {
         boolean isGc = kd.k[prev] <= kd.d[prev] && kd.k[last] > kd.d[last];
         if (!isGc) return null;
 
-        String crossDate = list.get(last).getDate(); // 你的資料目前是 yyyy-MM-dd
+        String crossDate = list.get(last).getDate();
 
         return new ScreenerResult(
                 info.ticker, info.name, info.industry,
@@ -337,7 +463,6 @@ public final class ScreenerEngine {
         KD kd = stochKD_SMA(list, kPeriod, 3, 3);
         boolean[] spike = needVolSpike ? volumeSpike(list, 20, 1.5) : null;
 
-        // 找出最後 persistDays 個有效 K（Python 用 dropna 後 tail）
         List<Integer> validIdx = new ArrayList<>();
         for (int i = 0; i < list.size(); i++) if (!Double.isNaN(kd.k[i])) validIdx.add(i);
         if (validIdx.size() < persistDays) return null;
@@ -372,11 +497,10 @@ public final class ScreenerEngine {
         KD kd = stochKD_SMA(list, kPeriod, 3, 3);
         boolean[] spike = needVolSpike ? volumeSpike(list, 20, 1.5) : null;
 
-        // Python：對 k_valid > thr 做「從尾端連續 True 計數」
         int n = list.size();
         int run = 0;
         for (int i = n - 1; i >= 0; i--) {
-            if (Double.isNaN(kd.k[i])) continue; // 跳過 NaN 直到遇到有效值後再算連續（簡化做法）
+            if (Double.isNaN(kd.k[i])) continue;
             if (kd.k[i] > thr) run++;
             else break;
         }

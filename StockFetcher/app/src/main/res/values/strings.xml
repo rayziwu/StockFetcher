@@ -41,9 +41,9 @@
     <string name="screener_mode_lt20">1. KD40 &lt; __   for __ days</string>
     <string name="screener_mode_gt45">2. KD40 &gt;__   for __~__ days</string>
     <string name="screener_mode_ma60_3pct" formatted="false">3. Differs MA60 &lt;±__% for__ days</string>
-    <string name="screener_mode_kd9_mo_gc">4. Monthly KD9 golden cross</string>
-    <string name="screener_mode_kd9_wk_gc">5. Weekly KD9 golden cross</string>
-    <string name="screener_mode_csv_list">6. Load a stock list from CSV</string>
+    <string name="screener_mode_kd9_mo_gc">5. Monthly KD9 golden cross</string>
+    <string name="screener_mode_kd9_wk_gc">6. Weekly KD9 golden cross</string>
+    <string name="screener_mode_csv_list">7. Load a stock list from CSV</string>
 
     <string name="toast_screener_running">Screening is running, please wait</string>
     <string name="toast_screener_started">Screening started: %1$s</string>
@@ -85,4 +85,25 @@
     <string name="screener_params_ma60">3.Deviates MA60 &lt;±%1$d%% for %2$d days</string>
 
     <string name="dialog_screener_done_msg_with_params">%1$s\n%2$s\nMatches: %3$d</string>
+    <string name="screener_params_macd_div_recent">4. Last %1$d %2$s bars, %3$s divergence</string>
+
+    <string name="div_tf_hour">Hour</string>
+    <string name="div_tf_day">Day</string>
+    <string name="div_tf_week">Week</string>
+    <string name="div_tf_month">Month</string>
+
+    <string name="div_side_bottom">Bottom</string>
+    <string name="div_side_top">Top</string>
+
+    <string-array name="div_tf_items">
+        <item>@string/div_tf_hour</item>
+        <item>@string/div_tf_day</item>
+        <item>@string/div_tf_week</item>
+        <item>@string/div_tf_month</item>
+    </string-array>
+
+    <string-array name="div_side_items">
+        <item>@string/div_side_bottom</item>
+        <item>@string/div_side_top</item>
+    </string-array>
 </resources>
