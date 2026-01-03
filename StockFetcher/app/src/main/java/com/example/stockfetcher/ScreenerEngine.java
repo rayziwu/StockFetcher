@@ -23,6 +23,9 @@ public final class ScreenerEngine {
         public Integer macdDivBars;   // recent N bars, default 2
         public String  macdDivTf;     // timeframe: "HOUR/DAY/WEEK/MONTH" (or "時/日/周/月", or "1h/1d/1wk/1mo")
         public String  macdDivSide;   // "BOTTOM/TOP" (or "底/頂")
+        public Integer kdGcBars;  // 最近N根，預設2
+        public String  kdGcTf;    // 時/日/周/月（或 Hour/Day/Week/Month）
+
     }
 
     public interface ProgressListener {
@@ -68,33 +71,28 @@ public final class ScreenerEngine {
         public static ModeConfig forMode(ScreenerMode mode) {
             switch (mode) {
                 case LT20:
-                    // [CHANGE] default N=20 (was 40)
                     return new ModeConfig("1d", 40, 20.0, true, 20, true,
                             0, 0, false, 0, 0.0, false);
 
                 case GT45:
-                    // [CHANGE] default N=20~30 (was 21~29)
                     return new ModeConfig("1d", 40, 45.0, false, 0, true,
                             20, 30, false, 0, 0.0, false);
 
                 case MA60_3PCT:
-                    // [CHANGE] use persistDays as MA-days default N=20
                     return new ModeConfig("1d", 0, 0.0, true, 20, false,
                             0, 0, true, 60, 0.03, false);
 
-                // ✅ 新增第4項：最近N根(時/日/周/月)K柱，底/頂部DIF/Hist背離
                 case MACD_DIV_RECENT:
-                    // 預設用 1h（會依 overrides.macdDivTf 覆寫）
+                    // 預設 1h（實際會依 ov.macdDivTf 覆寫）
                     return new ModeConfig("1h", 0, 0.0, true, 0, false,
                             0, 0, false, 0, 0.0, false);
 
-                case KD9_MO_GC:
-                    return new ModeConfig("1mo", 9, 0.0, true, 0, false,
-                            0, 0, false, 0, 0.0, true);
-
-                case KD9_WK_GC:
-                    return new ModeConfig("1wk", 9, 0.0, true, 0, false,
-                            0, 0, false, 0, 0.0, true);
+                case KD_GC_RECENT:
+                    // ✅ 新第5項：KD 黃金交叉（近N根XK）
+                    // 預設 1h（實際會依 ov.kdGcTf 覆寫）
+                    // 不需要 kPeriod / needGoldenCross（我們用已算好的 kdK/kdD 判斷）
+                    return new ModeConfig("1h", 0, 0.0, true, 0, false,
+                            0, 0, false, 0, 0.0, false);
 
                 default:
                     throw new IllegalArgumentException("Unsupported mode: " + mode);
@@ -128,8 +126,16 @@ public final class ScreenerEngine {
 
         ModeConfig cfg = ModeConfig.forMode(mode);
 
-        // ✅ interval 可能被 MACD divergence 的 timeframe 參數覆寫
         String interval = cfg.interval;
+        if (mode == ScreenerMode.MACD_DIV_RECENT) {
+            interval = resolveMacdDivInterval(ov);
+        } else if (mode == ScreenerMode.KD_GC_RECENT) {
+            interval = resolveKdGcInterval(ov);
+        }
+        long startTime = getScreenerStartTimeSeconds(interval);
+
+        // ✅ interval 可能被 MACD divergence 的 timeframe 參數覆寫
+        interval = cfg.interval;
         if (mode == ScreenerMode.MACD_DIV_RECENT) {
             interval = resolveMacdDivInterval(ov);
         }
@@ -138,7 +144,7 @@ public final class ScreenerEngine {
         int done = 0;
 
         List<ScreenerResult> out = new ArrayList<>();
-        long startTime = getScreenerStartTimeSeconds(interval);
+        startTime = getScreenerStartTimeSeconds(interval);
 
         // resolve overrides (with sane clamps)
         final double ltThr = (ov != null && ov.ltThr != null) ? clampD(ov.ltThr, 0, 100) : cfg.thr;
@@ -152,6 +158,8 @@ public final class ScreenerEngine {
                 ? (clampD(ov.maBandPct, 0, 99) / 100.0)
                 : cfg.band;
         final int maDays = (ov != null && ov.maDays != null) ? clampI(ov.maDays, 1, 400) : cfg.persistDays;
+
+        final int kdGcBars = (ov != null && ov.kdGcBars != null) ? clampI(ov.kdGcBars, 1, 99) : 2;
 
         final int gtMin2 = Math.min(gtMin, gtMax);
         final int gtMax2 = Math.max(gtMin, gtMax);
@@ -178,7 +186,11 @@ public final class ScreenerEngine {
                 if (r != null) out.add(r);
                 continue;
             }
-
+            if (mode == ScreenerMode.KD_GC_RECENT) {
+                ScreenerResult r = evalKdGoldenCrossRecent(info, data, kdGcBars);
+                if (r != null) out.add(r);
+                continue;
+            }
             // MA60 band
             if (cfg.needMaBand) {
                 ScreenerResult r = evalMaBand(info, data, cfg.maWindow, maBand, maDays);
@@ -201,12 +213,95 @@ public final class ScreenerEngine {
                 r = evalLt20(info, data, cfg.kPeriod, ltThr, ltDays, cfg.wantLt, cfg.needVolSpike);
             }
             if (r != null) out.add(r);
-        }
+                    }
 
         out.sort(Comparator.comparingDouble((ScreenerResult r) -> r.avgClose60).reversed());
         return out;
     }
+    private static boolean isFinite(double v) {
+        return !Double.isNaN(v) && !Double.isInfinite(v);
+    }
 
+    private static ScreenerResult evalKdGoldenCrossRecent(
+            TickerInfo info,
+            List<StockDayPrice> list,
+            int lastBars
+    ) {
+        if (list == null || list.size() < 3) return null;
+
+        // 保險：確保時間序（你的 fetcher 已 sort；這行留著也不會壞）
+        list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
+
+        // 只用已算好的 kdK/kdD（優先使用已算好的KD資料）
+        List<Integer> valid = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            if (isFinite(list.get(i).kdK) && isFinite(list.get(i).kdD)) valid.add(i);
+        }
+        if (valid.size() < 2) return null;
+
+        int need = Math.max(2, lastBars); // 需要至少兩根才判斷交叉
+        int start = Math.max(1, valid.size() - need);
+
+        int crossIdx = -1;
+        int prevIdx = -1;
+
+        // 從尾端往回找「最近一次」交叉發生在 lastBars 內
+        for (int p = valid.size() - 1; p >= start; p--) {
+            int i = valid.get(p);
+            int j = valid.get(p - 1);
+
+            double kPrev = list.get(j).kdK;
+            double dPrev = list.get(j).kdD;
+            double kCur  = list.get(i).kdK;
+            double dCur  = list.get(i).kdD;
+
+            boolean gc = (kPrev <= dPrev) && (kCur > dCur);
+            if (gc) {
+                crossIdx = i;
+                prevIdx = j;
+                break;
+            }
+        }
+
+        if (crossIdx < 0) return null;
+
+        int n = list.size();
+        String crossDate = list.get(crossIdx).getDate();
+
+        return new ScreenerResult(
+                info.ticker, info.name, info.industry,
+                avgCloseLastN(list, 60), list.get(n - 1).getClose(),
+                list.get(crossIdx).kdK, list.get(crossIdx).kdD, null,
+                null, null,
+                crossDate
+        );
+    }
+    private static String resolveKdGcInterval(Overrides ov) {
+        String tf = (ov == null) ? null : ov.kdGcTf;
+        if (tf == null) return "1h";
+        tf = tf.trim();
+
+        switch (tf) {
+            // 中文
+            case "時": return "1h";
+            case "日": return "1d";
+            case "周": return "1wk";
+            case "月": return "1mo";
+
+            // 英文長字
+            case "Hour": case "HOUR": case "hour": return "1h";
+            case "Day":  case "DAY":  case "day":  return "1d";
+            case "Week": case "WEEK": case "week": return "1wk";
+            case "Month":case "MONTH":case "month":return "1mo";
+
+            // 也允許直接傳 interval
+            case "1h": case "1d": case "1wk": case "1mo":
+                return tf;
+
+            default:
+                return "1h";
+        }
+    }
     private static int clampI(int v, int lo, int hi) {
         if (v < lo) return lo;
         if (v > hi) return hi;
@@ -217,9 +312,6 @@ public final class ScreenerEngine {
         if (v < lo) return lo;
         if (v > hi) return hi;
         return v;
-    }
-    private static boolean isFinite(double v) {
-        return !Double.isNaN(v) && !Double.isInfinite(v);
     }
 
     // ✅ 解析 MACD divergence timeframe -> fetch interval

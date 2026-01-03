@@ -5,7 +5,6 @@ public enum ScreenerMode {
     GT45,      // consecutive KD40>45 run 21~29 + vol spike
     MA60_3PCT, // close within ±3% of MA60 for last 40
     MACD_DIV_RECENT,   // ✅ 新增第4
-    KD9_MO_GC, // monthly KD9 golden cross
-    KD9_WK_GC, // weekly KD9 golden cross
+    KD_GC_RECENT,      // ✅ 新第5項：最近N根XK內有KD黃金交叉
     CSV_LIST   // load list from CSV
 }

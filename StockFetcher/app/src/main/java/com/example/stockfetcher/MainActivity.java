@@ -166,6 +166,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private double minPriceGlobal = 0.0;
     private double priceRangeGlobal = 0.0;
     private final int NUM_PRICE_BUCKETS = 76;
+    private int pKdGcBars = 2;
+    private String pKdGcTf = "時";
+
+    private int activeKdGcBars = 2;
+    private String activeKdGcTf = "時";
 
     private CoordinateMarkerView coordinateMarker;
     // 從股票清單 cache 讀到的 meta（ticker -> info）
@@ -470,6 +475,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         activeMacdDivBars,
                         activeMacdDivTf,
                         activeMacdDivSide);
+            case KD_GC_RECENT:
+                return getString(R.string.screener_params_kd_gc_recent,
+                        activeKdGcBars,
+                        activeKdGcTf);
             default:
                 return ""; // 其他模式不顯示參數
         }
@@ -479,12 +488,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         final String target;
         switch (mode) {
-            case KD9_MO_GC: target = "1mo"; break;
-            case KD9_WK_GC: target = "1wk"; break;
+            case MACD_DIV_RECENT:
+                target = mapTfToInterval(activeMacdDivTf);
+                break;
+
+            case KD_GC_RECENT:
+                target = mapTfToInterval(activeKdGcTf);
+                break;
+
             case LT20:
             case GT45:
             case MA60_3PCT:
-            default: target = "1d"; break;
+            default:
+                target = "1d";
+                break;
         }
 
         if (target.equals(currentInterval)) return;
@@ -502,6 +519,29 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             intervalSwitchButton.setText(displayText[currentIntervalIndex]);
         }
         updateDateInputByInterval(currentInterval);
+    }
+
+    private String mapTfToInterval(String tf) {
+        if (tf == null) return "1d";
+        tf = tf.trim();
+
+        // 中文
+        if ("時".equals(tf)) return "1h";
+        if ("日".equals(tf)) return "1d";
+        if ("周".equals(tf)) return "1wk";
+        if ("月".equals(tf)) return "1mo";
+
+        // 英文長字
+        String up = tf.toUpperCase(java.util.Locale.ROOT);
+        if ("HOUR".equals(up)) return "1h";
+        if ("DAY".equals(up)) return "1d";
+        if ("WEEK".equals(up)) return "1wk";
+        if ("MONTH".equals(up)) return "1mo";
+
+        // 直接傳 interval 也接受
+        if ("1h".equals(tf) || "1d".equals(tf) || "1wk".equals(tf) || "1mo".equals(tf)) return tf;
+
+        return "1d";
     }
     private void openCsvListPicker() {
         java.io.File dir = getExternalFilesDir(null);
@@ -743,6 +783,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         activeMacdDivTf   = pMacdDivTf;
         activeMacdDivSide = pMacdDivSide;
 
+        activeKdGcBars = pKdGcBars;
+        activeKdGcTf   = pKdGcTf;
+
         this.screenerMode = mode;
         this.isScreening = true;
         setControlsEnabled(false);
@@ -770,22 +813,26 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         it.putExtra(ScreenerForegroundService.EXTRA_MACD_DIV_TF,   activeMacdDivTf);
         it.putExtra(ScreenerForegroundService.EXTRA_MACD_DIV_SIDE, activeMacdDivSide);
 
+        it.putExtra(ScreenerForegroundService.EXTRA_KD_GC_BARS, activeKdGcBars);
+        it.putExtra(ScreenerForegroundService.EXTRA_KD_GC_TF,   activeKdGcTf);
+
         androidx.core.content.ContextCompat.startForegroundService(this, it);
     }
     private void showScreenerModeDialog() {
         final boolean isZh = getResources().getConfiguration().getLocales().get(0)
                 .getLanguage().toLowerCase(java.util.Locale.ROOT).startsWith("zh");
 
-        final int dp6  = Math.round(6f  * getResources().getDisplayMetrics().density);
-        final int dp10 = Math.round(10f * getResources().getDisplayMetrics().density);
-        final int dp44 = Math.round(44f * getResources().getDisplayMetrics().density);
+        final float density = getResources().getDisplayMetrics().density;
+        final int dp2  = Math.round(2f  * density);
+        final int dp6  = Math.round(6f  * density);
+        final int dp10 = Math.round(10f * density);
+        final int dp44 = Math.round(44f * density);
+        final int dp40 = Math.round(40f * density);
+        final int dp60 = Math.round(60f * density);
 
         android.text.InputFilter[] twoDigits = new android.text.InputFilter[] {
                 new android.text.InputFilter.LengthFilter(2)
         };
-
-        final int dp40 = Math.round(40f * getResources().getDisplayMetrics().density);
-        final int dp6v = Math.round(6f  * getResources().getDisplayMetrics().density);
 
         java.util.function.Function<Integer, android.widget.EditText> mk2d = (defVal) -> {
             android.widget.EditText e = new android.widget.EditText(this);
@@ -795,18 +842,23 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             e.setSingleLine(true);
             e.setGravity(android.view.Gravity.CENTER);
 
-            // 關鍵：不要 setMinHeight(0)，反而要保底高度 + padding
+            // 你已驗證這組高度/內距 OK
             e.setMinHeight(dp40);
-            e.setPadding(e.getPaddingLeft(), dp6v, e.getPaddingRight(), dp6v);
+            e.setPadding(e.getPaddingLeft(), dp2, e.getPaddingRight(), dp2);
 
             android.widget.LinearLayout.LayoutParams lp =
                     new android.widget.LinearLayout.LayoutParams(dp44, dp40);
-            lp.leftMargin = dp6v;
-            lp.rightMargin = dp6v;
+            lp.leftMargin = dp2;
+            lp.rightMargin = dp2;
             e.setLayoutParams(lp);
-
             return e;
         };
+
+        final String[] sideItems = getResources().getStringArray(R.array.div_side_items);
+// 讓 Bottom/Top 也不會被切字，寬度建議比 tf picker 大一點
+        final int dp72 = Math.round(72f * density);
+
+
         java.util.function.Function<String, android.widget.TextView> mkText = (s) -> {
             android.widget.TextView tv = new android.widget.TextView(this);
             tv.setText(s);
@@ -826,24 +878,82 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                     new android.widget.LinearLayout.LayoutParams(
                             android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                             android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.leftMargin = dp6;
-            lp.rightMargin = dp6;
+            lp.leftMargin = dp2;
+            lp.rightMargin = dp2;
             sp.setLayoutParams(lp);
             return sp;
         };
 
-        // 依照「你存下來的字」（可能是 時/日/周/月 或 H/D/W/M 或 1h/1d...）決定 spinner index
+        java.util.function.Function<Integer, android.widget.NumberPicker> mkNp2d = (defVal) -> {
+            android.widget.NumberPicker np = new android.widget.NumberPicker(this);
+            np.setMinValue(1);
+            np.setMaxValue(99);
+            np.setValue(Math.max(1, Math.min(99, defVal)));
+            np.setWrapSelectorWheel(true);
+            // 允許點進去輸入
+            np.setDescendantFocusability(android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS);
+
+            android.widget.LinearLayout.LayoutParams lp =
+                    new android.widget.LinearLayout.LayoutParams(dp44, dp40);
+            lp.leftMargin = dp6;
+            lp.rightMargin = dp6;
+            np.setLayoutParams(lp);
+            return np;
+        };
+
+        // 把「時/日/周/月、Hour/Day/Week/Month、1h/1d/1wk/1mo」都映射成 spinner index
         java.util.function.Function<String, Integer> tfToIndex = (v) -> {
             if (v == null) return -1;
             String raw = v.trim();
             if (raw.isEmpty()) return -1;
             String up = raw.toUpperCase(java.util.Locale.ROOT);
 
-            if ("時".equals(raw) || "H".equals(up) || "HOUR".equals(up) || "1H".equals(up) || "1h".equals(raw)) return 0;
-            if ("日".equals(raw) || "D".equals(up) || "DAY".equals(up)  || "1D".equals(up) || "1d".equals(raw)) return 1;
-            if ("周".equals(raw) || "W".equals(up) || "WEEK".equals(up) || "1WK".equals(up) || "1wk".equals(raw)) return 2;
-            if ("月".equals(raw) || "M".equals(up) || "MONTH".equals(up)|| "1MO".equals(up) || "1mo".equals(raw)) return 3;
+            if ("時".equals(raw) || "HOUR".equals(up) || "1H".equals(up) || "1h".equals(raw)) return 0;
+            if ("日".equals(raw) || "DAY".equals(up)  || "1D".equals(up) || "1d".equals(raw)) return 1;
+            if ("周".equals(raw) || "WEEK".equals(up) || "1WK".equals(up) || "1wk".equals(raw)) return 2;
+            if ("月".equals(raw) || "MONTH".equals(up)|| "1MO".equals(up) || "1mo".equals(raw)) return 3;
             return -1;
+        };
+
+        final String[] tfItems = getResources().getStringArray(R.array.div_tf_items);
+
+        java.util.function.Function<String, android.widget.NumberPicker> mkTfPicker = (defTf) -> {
+            android.widget.NumberPicker np = new android.widget.NumberPicker(this);
+            np.setMinValue(0);
+            np.setMaxValue(tfItems.length - 1);
+            np.setDisplayedValues(tfItems);
+            np.setWrapSelectorWheel(true);
+            np.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+
+            int idx = tfToIndex.apply(defTf);
+            if (idx < 0 || idx >= tfItems.length) idx = 0;
+            np.setValue(idx);
+
+            // ✅ 固定寬度 + 固定高度
+            android.widget.LinearLayout.LayoutParams lp =
+                    new android.widget.LinearLayout.LayoutParams(dp44, dp60);
+            lp.leftMargin = Math.round(2f * density);
+            lp.rightMargin = Math.round(2f * density);
+            np.setLayoutParams(lp);
+
+            // ✅ 把 NumberPicker 自己的 padding 清掉（內部留白會變少）
+            np.setPadding(0, 0, 0, 0);
+
+            // ✅ 再把內部顯示文字的 EditText 左右 padding 清掉（這個才是「看起來很寬」的主因之一）
+            try {
+                int id = getResources().getIdentifier("numberpicker_input", "id", "android");
+                android.widget.EditText input = np.findViewById(id);
+                if (input != null) {
+                    input.setPadding(0, input.getPaddingTop(), 0, input.getPaddingBottom());
+                    input.setGravity(android.view.Gravity.CENTER);
+                    // 可選：字太大也會擠，稍微小一點更好看
+                    // input.setTextSize(16f);
+                }
+            } catch (Exception ignored) {}
+
+            // ✅ 有些機型會吃 minWidth，保險起見也設一下
+            np.setMinimumWidth(dp44);
+            return np;
         };
 
         java.util.function.Function<String, Integer> sideToIndex = (v) -> {
@@ -852,9 +962,42 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             if (raw.isEmpty()) return -1;
             String up = raw.toUpperCase(java.util.Locale.ROOT);
 
-            if ("底".equals(raw) || "B".equals(up) || "BOTTOM".equals(up)) return 0;
-            if ("頂".equals(raw) || "T".equals(up) || "TOP".equals(up)) return 1;
+            if ("底".equals(raw) || "BOTTOM".equals(up)) return 0;
+            if ("頂".equals(raw) || "TOP".equals(up)) return 1;
             return -1;
+        };
+
+        java.util.function.Function<String, android.widget.NumberPicker> mkSidePicker = (defSide) -> {
+            android.widget.NumberPicker np = new android.widget.NumberPicker(this);
+            np.setMinValue(0);
+            np.setMaxValue(sideItems.length - 1);
+            np.setDisplayedValues(sideItems);
+            np.setWrapSelectorWheel(true);
+            np.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+
+            int idx = sideToIndex.apply(defSide);
+            if (idx < 0 || idx >= sideItems.length) idx = 0;
+            np.setValue(idx);
+
+            android.widget.LinearLayout.LayoutParams lp =
+                    new android.widget.LinearLayout.LayoutParams(dp60, dp60);
+            lp.leftMargin = dp2;
+            lp.rightMargin = dp2;
+            np.setLayoutParams(lp);
+
+            np.setPadding(0, 0, 0, 0);
+
+            try {
+                int id = getResources().getIdentifier("numberpicker_input", "id", "android");
+                android.widget.EditText input = np.findViewById(id);
+                if (input != null) {
+                    input.setPadding(0, input.getPaddingTop(), 0, input.getPaddingBottom());
+                    input.setGravity(android.view.Gravity.CENTER);
+                }
+            } catch (Exception ignored) {}
+
+            np.setMinimumWidth(dp72);
+            return np;
         };
 
         android.widget.LinearLayout root = new android.widget.LinearLayout(this);
@@ -864,13 +1007,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.addView(root);
 
-        // Row 1
+        // ---------- Row 1: LT20 ----------
         final android.widget.EditText etLtThr  = mk2d.apply(pLtThr);
         final android.widget.EditText etLtDays = mk2d.apply(pLtDays);
 
         android.widget.LinearLayout row1 = new android.widget.LinearLayout(this);
         row1.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        row1.setPadding(0, 0, 0, 0);
+        row1.setPadding(0, dp2, 0, dp2);
+        row1.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row1.addView(mkText.apply("1.KD40 <"));
         row1.addView(etLtThr);
         row1.addView(mkText.apply(isZh ? "連續" : "for"));
@@ -878,14 +1022,15 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row1.addView(mkText.apply(isZh ? "天" : "days"));
         row1.setClickable(true);
 
-        // Row 2
+        // ---------- Row 2: GT45 ----------
         final android.widget.EditText etGtThr = mk2d.apply(pGtThr);
         final android.widget.EditText etGtMin = mk2d.apply(pGtMin);
         final android.widget.EditText etGtMax = mk2d.apply(pGtMax);
 
         android.widget.LinearLayout row2 = new android.widget.LinearLayout(this);
         row2.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        row2.setPadding(0, 0, 0, 0);
+        row2.setPadding(0, dp2, 0, dp2);
+        row2.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row2.addView(mkText.apply("2.KD40 >"));
         row2.addView(etGtThr);
         row2.addView(mkText.apply(isZh ? "連續" : "for"));
@@ -895,81 +1040,85 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row2.addView(mkText.apply(isZh ? "天" : "days"));
         row2.setClickable(true);
 
-        // Row 3
+        // ---------- Row 3: MA60 band ----------
         final android.widget.EditText etMaBand = mk2d.apply(pMaBandPct);
         final android.widget.EditText etMaDays = mk2d.apply(pMaDays);
 
         android.widget.LinearLayout row3 = new android.widget.LinearLayout(this);
         row3.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        row3.setPadding(0, 0, 0, 0);
+        row3.setPadding(0, dp2, 0, dp2);
+        row3.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row3.addView(mkText.apply(isZh ? "3. 相較MA60 <" : "3. Differs MA60 <"));
         row3.addView(etMaBand);
         row3.addView(mkText.apply("%"));
-        row3.addView(mkText.apply(isZh ? "連續" : "for"));
+        row3.addView(mkText.apply(isZh ? " 連續" : " for"));
         row3.addView(etMaDays);
         row3.addView(mkText.apply(isZh ? "天" : "days"));
         row3.setClickable(true);
 
-        // ✅ Row 4 (two lines)
+// ---------- Row 4: MACD divergence (one line) ----------
         final android.widget.EditText etMacdBars = mk2d.apply(pMacdDivBars);
-        final android.widget.Spinner spMacdTf = mkSpinner.apply(R.array.div_tf_items);       // zh:時日周月 / en:H D W M
-        final android.widget.Spinner spMacdSide = mkSpinner.apply(R.array.div_side_items);  // zh:底頂 / en:B T
-
-        int tfIdx = tfToIndex.apply(pMacdDivTf);
-        if (tfIdx >= 0 && tfIdx < spMacdTf.getCount()) spMacdTf.setSelection(tfIdx);
-
-        int sideIdx = sideToIndex.apply(pMacdDivSide);
-        if (sideIdx >= 0 && sideIdx < spMacdSide.getCount()) spMacdSide.setSelection(sideIdx);
+        final android.widget.NumberPicker npMacdTf = mkTfPicker.apply(pMacdDivTf);
+        final android.widget.NumberPicker npMacdSide = mkSidePicker.apply(pMacdDivSide);
 
         android.widget.LinearLayout row4 = new android.widget.LinearLayout(this);
-        row4.setOrientation(android.widget.LinearLayout.VERTICAL);
-        row4.setPadding(0, dp6, 0, dp6);
+        row4.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row4.setPadding(0, dp2, 0, dp2);
+        row4.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row4.setClickable(true);
 
-        android.widget.LinearLayout row4a = new android.widget.LinearLayout(this);
-        row4a.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-
         if (isZh) {
-            row4a.addView(mkText.apply("4. 最近"));
-            row4a.addView(etMacdBars);
-            row4a.addView(mkText.apply("根"));
-            row4a.addView(spMacdTf);
-            row4a.addView(mkText.apply("K柱"));
+            row4.addView(mkText.apply("4. 最近"));
+            row4.addView(etMacdBars);
+            row4.addView(mkText.apply("根"));
+            row4.addView(npMacdTf);
+            row4.addView(mkText.apply("K柱"));
+            row4.addView(npMacdSide);
+            row4.addView(mkText.apply("部背離"));
         } else {
-            row4a.addView(mkText.apply("4. Last"));
-            row4a.addView(etMacdBars);
-            row4a.addView(spMacdTf);
-            row4a.addView(mkText.apply("bars"));
+            row4.addView(mkText.apply("4.Last"));
+            row4.addView(etMacdBars);
+            row4.addView(npMacdTf);
+            row4.addView(mkText.apply("bars"));
+            row4.addView(npMacdSide);
+            row4.addView(mkText.apply("divergence"));
         }
 
-        android.widget.LinearLayout row4b = new android.widget.LinearLayout(this);
-        row4b.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        row4b.addView(spMacdSide);
-        row4b.addView(mkText.apply(isZh ? "部背離" : "divergence"));
+// ---------- Row 5: KD golden cross recent (one line) ----------
+        final android.widget.EditText etKdGcBars = mk2d.apply(pKdGcBars);
+        final android.widget.NumberPicker npKdGcTf = mkTfPicker.apply(pKdGcTf);
 
-        row4.addView(row4a);
-        row4.addView(row4b);
-
-        // Row 5/6/7
-        android.widget.TextView row5 = mkText.apply(getString(R.string.screener_mode_kd9_mo_gc));
-        row5.setPadding(0, dp6, 0, dp6);
+        android.widget.LinearLayout row5 = new android.widget.LinearLayout(this);
+        row5.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row5.setPadding(0, dp2, 0, dp2);
+        row5.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row5.setClickable(true);
 
-        android.widget.TextView row6 = mkText.apply(getString(R.string.screener_mode_kd9_wk_gc));
+        if (isZh) {
+            row5.addView(mkText.apply("5. 最近"));
+            row5.addView(etKdGcBars);
+            row5.addView(mkText.apply("根"));
+            row5.addView(npKdGcTf);
+            row5.addView(mkText.apply("K柱 KD黃金交叉"));
+        } else {
+            row5.addView(mkText.apply("5.Last"));
+            row5.addView(etKdGcBars);
+            row5.addView(npKdGcTf);
+            row5.addView(mkText.apply("bars KD golden cross"));
+        }
+
+        // ---------- Row 6: CSV list ----------
+        android.widget.TextView row6 = mkText.apply(getString(R.string.screener_mode_csv_list));
         row6.setPadding(0, dp6, 0, dp6);
         row6.setClickable(true);
 
-        android.widget.TextView row7 = mkText.apply(getString(R.string.screener_mode_csv_list));
-        row7.setPadding(0, dp6, 0, dp6);
-        row7.setClickable(true);
-
+        // add rows
         root.addView(row1);
         root.addView(row2);
         root.addView(row3);
         root.addView(row4);
         root.addView(row5);
         root.addView(row6);
-        root.addView(row7);
 
         final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.screener_title)
@@ -987,6 +1136,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         };
 
+        // clicks
         row1.setOnClickListener(v -> {
             Integer thr = readInt.apply(etLtThr);
             Integer days = readInt.apply(etLtDays);
@@ -1021,18 +1171,36 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             Integer bars = readInt.apply(etMacdBars);
             pMacdDivBars = clampInt(bars != null ? bars : 2, 1, 99);
 
-            pMacdDivTf = String.valueOf(spMacdTf.getSelectedItem()).trim();       // zh:時/日/周/月, en:H/D/W/M
-            pMacdDivSide = String.valueOf(spMacdSide.getSelectedItem()).trim();  // zh:底/頂, en:B/T
+            pMacdDivTf = tfItems[npMacdTf.getValue()];
+            pMacdDivSide = sideItems[npMacdSide.getValue()];
 
             dlg.dismiss();
             prepareIndustryThenStartScreening(ScreenerMode.MACD_DIV_RECENT);
         });
 
-        row5.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_MO_GC); });
-        row6.setOnClickListener(v -> { dlg.dismiss(); prepareIndustryThenStartScreening(ScreenerMode.KD9_WK_GC); });
-        row7.setOnClickListener(v -> { dlg.dismiss(); openCsvListPicker(); });
+        row5.setOnClickListener(v -> {
+            Integer bars = readInt.apply(etKdGcBars);
+            pKdGcBars = clampInt(bars != null ? bars : 2, 1, 99);
+
+            pKdGcTf = tfItems[npKdGcTf.getValue()]; // tfItems = getStringArray(R.array.div_tf_items)
+
+            dlg.dismiss();
+            prepareIndustryThenStartScreening(ScreenerMode.KD_GC_RECENT);
+        });
+
+        row6.setOnClickListener(v -> {
+            dlg.dismiss();
+            openCsvListPicker();
+        });
 
         dlg.show();
+    }
+
+    // 你原本就有 clampInt；這裡避免你沒有 clampLearned
+    private int clampLearned(int v, int lo, int hi) {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
     }
     private void prepareIndustryThenStartScreening(ScreenerMode mode) {
         if (isScreening) return;
@@ -1215,10 +1383,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         activeMacdDivBars,
                         activeMacdDivTf,
                         activeMacdDivSide);
-            case KD9_MO_GC:
-                return getString(R.string.screener_mode_kd9_mo_gc);
-            case KD9_WK_GC:
-                return getString(R.string.screener_mode_kd9_wk_gc);
+            case KD_GC_RECENT:
+                return getString(R.string.screener_mode_kd_gc_recent);
             default:
                 return mode.name();
         }
@@ -1435,7 +1601,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         String msg = (screenerMode == ScreenerMode.LT20
                                 || screenerMode == ScreenerMode.GT45
                                 || screenerMode == ScreenerMode.MA60_3PCT
-                                || screenerMode == ScreenerMode.MACD_DIV_RECENT)
+                                || screenerMode == ScreenerMode.MACD_DIV_RECENT
+                                || screenerMode == ScreenerMode.KD_GC_RECENT)
                                 ? getString(R.string.dialog_screener_done_msg_with_params, "", paramsLine, count)
                                 : getString(R.string.dialog_screener_done_msg_with_params, modeLabel, paramsLine, count);
 

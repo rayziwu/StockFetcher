@@ -53,6 +53,8 @@ public class ScreenerForegroundService extends Service {
 
     private static final String CH_ID = "screener_channel";
     private static final int NOTIF_ID = 1001;
+    public static final String EXTRA_KD_GC_BARS = "kd_gc_bars";
+    public static final String EXTRA_KD_GC_TF   = "kd_gc_tf";
 
     private final ExecutorService exec = Executors.newSingleThreadExecutor();
     private Future<?> job;
@@ -116,6 +118,8 @@ public class ScreenerForegroundService extends Service {
             ov.macdDivBars = getIntOrNull(intent, EXTRA_MACD_DIV_BARS);
             ov.macdDivTf = getTrimmedStringOrNull(intent, EXTRA_MACD_DIV_TF);
             ov.macdDivSide = getTrimmedStringOrNull(intent, EXTRA_MACD_DIV_SIDE);
+            ov.kdGcBars = getIntOrNull(intent, EXTRA_KD_GC_BARS);
+            ov.kdGcTf   = getTrimmedStringOrNull(intent, EXTRA_KD_GC_TF);
 
             Log.d("ScreenerSvc", "mode=" + mode
                     + " ov.ltThr=" + ov.ltThr + " ov.ltDays=" + ov.ltDays
@@ -330,12 +334,10 @@ public class ScreenerForegroundService extends Service {
                 case LT20: tag = "LT20"; break;
                 case GT45: tag = "GT45"; break;
                 case MA60_3PCT: tag = "MA60_3PCT_40D"; break;
-                case MACD_DIV_RECENT: tag = "MACD_DIV_RECENT"; break; // ✅ 新增
-                case KD9_MO_GC: tag = "KD9_MO_GC"; break;
-                case KD9_WK_GC: tag = "KD9_WK_GC"; break;
+                case MACD_DIV_RECENT: tag = "MACD_DIV_RECENT"; break;
+                case KD_GC_RECENT: tag = "KD_GC_RECENT"; break;   // ✅ 新增
                 default: tag = "MODE"; break;
             }
-
             File out = new File(dir, "TW_SCREENER_" + tag + ".csv");
 
             try (FileWriter fw = new FileWriter(out, false)) {
@@ -346,6 +348,8 @@ public class ScreenerForegroundService extends Service {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40,KD45_RunDays\n";
                 } else if (mode == ScreenerMode.LT20) {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40\n";
+                } else if (mode == ScreenerMode.KD_GC_RECENT) {
+                header = "Ticker,Name,Industry,AvgClose60,LatestClose,CrossDate,LastK,LastD\n";
                 } else {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose\n";
                 }
