@@ -218,6 +218,9 @@ public final class ScreenerEngine {
         if (v > hi) return hi;
         return v;
     }
+    private static boolean isFinite(double v) {
+        return !Double.isNaN(v) && !Double.isInfinite(v);
+    }
 
     // ✅ 解析 MACD divergence timeframe -> fetch interval
     private static String resolveMacdDivInterval(Overrides ov) {
@@ -280,40 +283,6 @@ public final class ScreenerEngine {
             default:
                 return MacdDivergenceUtil.Side.BOTTOM;
         }
-    }
-
-    // ---------- helpers (對齊 Python 的 rolling KD) ----------
-
-    private static class KD {
-        final double[] k;
-        final double[] d;
-        KD(double[] k, double[] d) { this.k = k; this.d = d; }
-    }
-
-    private static KD stochKD_SMA(List<StockDayPrice> list, int kPeriod, int smoothK, int dPeriod) {
-        int n = list.size();
-        double[] kRaw = new double[n];
-        double[] k = new double[n];
-        double[] d = new double[n];
-
-        for (int i = 0; i < n; i++) { kRaw[i] = Double.NaN; k[i] = Double.NaN; d[i] = Double.NaN; }
-
-        for (int i = kPeriod - 1; i < n; i++) {
-            double ll = Double.POSITIVE_INFINITY;
-            double hh = Double.NEGATIVE_INFINITY;
-            for (int j = i - kPeriod + 1; j <= i; j++) {
-                ll = Math.min(ll, list.get(j).getLow());
-                hh = Math.max(hh, list.get(j).getHigh());
-            }
-            double denom = hh - ll;
-            if (denom <= 0) continue;
-            double close = list.get(i).getClose();
-            kRaw[i] = 100.0 * (close - ll) / denom;
-        }
-
-        sma(kRaw, smoothK, k);
-        sma(k, dPeriod, d);
-        return new KD(k, d);
     }
 
     private static void sma(double[] src, int window, double[] dst) {
@@ -388,6 +357,7 @@ public final class ScreenerEngine {
     }
 
     // [CHANGE] add tailDays
+    // ✅ 不再重算 MA：直接使用 fetcher 已填好的 prices.get(i).maXX
     private static ScreenerResult evalMaBand(
             TickerInfo info,
             List<StockDayPrice> list,
@@ -396,26 +366,29 @@ public final class ScreenerEngine {
             int tailDays
     ) {
         int days = Math.max(1, tailDays);
-        int needLen = maWindow + days + 10;
-        if (list.size() < needLen) return null;
+        if (list == null || list.isEmpty()) return null;
 
-        double[] close = new double[list.size()];
-        for (int i = 0; i < list.size(); i++) close[i] = list.get(i).getClose();
-
-        double[] ma = new double[list.size()];
-        sma(close, maWindow, ma);
-
+        // 保底：至少要能看最後 days 根，且 MA 欄位要有值
+        // 不強制用 maWindow+days+10 這種長度推算（因為 MA 是否可用由欄位是否為 finite 決定）
         int n = list.size();
+        if (n < days) return null;
+
+        // 檢查最後 days 根是否都在 band 內（|close-ma|/ma <= band）
         for (int i = n - days; i < n; i++) {
-            if (i < 0) return null;
-            if (Double.isNaN(ma[i]) || ma[i] == 0.0) return null;
-            double diffPct = Math.abs(close[i] - ma[i]) / ma[i];
+            double close = list.get(i).getClose();
+            double ma = getMaField(list.get(i), maWindow);
+
+            if (!Double.isFinite(ma) || ma == 0.0) return null;
+
+            double diffPct = Math.abs(close - ma) / ma;
             if (diffPct > band) return null;
         }
 
-        double latestClose = close[n - 1];
-        double latestMa = ma[n - 1];
-        double latestDiffPct = (latestMa != 0.0) ? Math.abs(latestClose - latestMa) / latestMa : Double.NaN;
+        double latestClose = list.get(n - 1).getClose();
+        double latestMa = getMaField(list.get(n - 1), maWindow);
+        double latestDiffPct = (Double.isFinite(latestMa) && latestMa != 0.0)
+                ? Math.abs(latestClose - latestMa) / latestMa
+                : Double.NaN;
 
         return new ScreenerResult(
                 info.ticker, info.name, info.industry,
@@ -425,22 +398,40 @@ public final class ScreenerEngine {
                 null
         );
     }
-
+    private static double getMaField(StockDayPrice p, int window) {
+        if (p == null) return Double.NaN;
+        switch (window) {
+            case 35:  return p.ma35;
+            case 60:  return p.ma60;
+            case 120: return p.ma120;
+            case 200: return p.ma200;
+            case 240: return p.ma240;
+            default:  return Double.NaN;
+        }
+    }
     private static ScreenerResult evalGoldenCross(TickerInfo info, List<StockDayPrice> list, int kPeriod) {
+        if (list == null || list.isEmpty()) return null;
+
+        // 保險：你的日期是 yyyy-MM-dd（或 1h 你目前仍是 yyyy-MM-dd），字串排序至少穩定
         list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
-        KD kd = stochKD_SMA(list, kPeriod, 3, 3);
 
         int n = list.size();
         int last = -1, prev = -1;
+
         for (int i = n - 1; i >= 0; i--) {
-            if (!Double.isNaN(kd.k[i]) && !Double.isNaN(kd.d[i])) { last = i; break; }
+            if (isFinite(list.get(i).kdK) && isFinite(list.get(i).kdD)) { last = i; break; }
         }
         for (int i = last - 1; i >= 0; i--) {
-            if (!Double.isNaN(kd.k[i]) && !Double.isNaN(kd.d[i])) { prev = i; break; }
+            if (isFinite(list.get(i).kdK) && isFinite(list.get(i).kdD)) { prev = i; break; }
         }
         if (last < 0 || prev < 0) return null;
 
-        boolean isGc = kd.k[prev] <= kd.d[prev] && kd.k[last] > kd.d[last];
+        double kPrev = list.get(prev).kdK;
+        double dPrev = list.get(prev).kdD;
+        double kLast = list.get(last).kdK;
+        double dLast = list.get(last).kdD;
+
+        boolean isGc = kPrev <= dPrev && kLast > dLast;
         if (!isGc) return null;
 
         String crossDate = list.get(last).getDate();
@@ -448,7 +439,7 @@ public final class ScreenerEngine {
         return new ScreenerResult(
                 info.ticker, info.name, info.industry,
                 avgCloseLastN(list, 60), list.get(n - 1).getClose(),
-                kd.k[last], kd.d[last], null,
+                kLast, dLast, null,
                 null, null,
                 crossDate
         );
@@ -458,23 +449,32 @@ public final class ScreenerEngine {
             TickerInfo info, List<StockDayPrice> list,
             int kPeriod, double thr, int persistDays, boolean wantLt, boolean needVolSpike
     ) {
+        if (list == null || list.isEmpty()) return null;
+
+        // 原本你用 kPeriod 做長度保底，這裡保留（也可更寬鬆）
         if (list.size() < Math.max(60, kPeriod + 40 + 10)) return null;
 
-        KD kd = stochKD_SMA(list, kPeriod, 3, 3);
         boolean[] spike = needVolSpike ? volumeSpike(list, 20, 1.5) : null;
 
+        // 用 fetcher 算好的 kdK：找出有效 K index（等價於 dropna 後 tail）
         List<Integer> validIdx = new ArrayList<>();
-        for (int i = 0; i < list.size(); i++) if (!Double.isNaN(kd.k[i])) validIdx.add(i);
+        for (int i = 0; i < list.size(); i++) {
+            if (isFinite(list.get(i).kdK)) validIdx.add(i);
+        }
         if (validIdx.size() < persistDays) return null;
 
         int startPos = validIdx.size() - persistDays;
+
         boolean anySpike = false;
-        double lastK = kd.k[validIdx.get(validIdx.size() - 1)];
+        double lastK = list.get(validIdx.get(validIdx.size() - 1)).kdK;
 
         for (int p = startPos; p < validIdx.size(); p++) {
             int i = validIdx.get(p);
-            boolean ok = wantLt ? (kd.k[i] < thr) : (kd.k[i] > thr);
+            double k = list.get(i).kdK;
+
+            boolean ok = wantLt ? (k < thr) : (k > thr);
             if (!ok) return null;
+
             if (needVolSpike && spike != null && spike[i]) anySpike = true;
         }
         if (needVolSpike && !anySpike) return null;
@@ -492,30 +492,41 @@ public final class ScreenerEngine {
             TickerInfo info, List<StockDayPrice> list,
             int kPeriod, double thr, int runMin, int runMax, boolean needVolSpike
     ) {
+        if (list == null || list.isEmpty()) return null;
         if (list.size() < Math.max(60, kPeriod + 40 + 10)) return null;
 
-        KD kd = stochKD_SMA(list, kPeriod, 3, 3);
         boolean[] spike = needVolSpike ? volumeSpike(list, 20, 1.5) : null;
 
-        int n = list.size();
+        // dropna(k) 後，從尾端數連續 > thr
+        List<Integer> validIdx = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            if (isFinite(list.get(i).kdK)) validIdx.add(i);
+        }
+        if (validIdx.isEmpty()) return null;
+
         int run = 0;
-        for (int i = n - 1; i >= 0; i--) {
-            if (Double.isNaN(kd.k[i])) continue;
-            if (kd.k[i] > thr) run++;
+        for (int p = validIdx.size() - 1; p >= 0; p--) {
+            int idx = validIdx.get(p);
+            double k = list.get(idx).kdK;
+            if (k > thr) run++;
             else break;
         }
 
         if (run < runMin || run > runMax) return null;
 
-        boolean anySpike = false;
         if (needVolSpike && spike != null) {
-            for (int i = n - run; i < n; i++) if (spike[i]) { anySpike = true; break; }
+            boolean anySpike = false;
+            // 檢查最後 run 根「有效K對應的 bar」是否有量放大
+            for (int p = validIdx.size() - run; p < validIdx.size(); p++) {
+                int idx = validIdx.get(p);
+                if (spike[idx]) { anySpike = true; break; }
+            }
             if (!anySpike) return null;
         }
 
-        double lastK = Double.NaN;
-        for (int i = n - 1; i >= 0; i--) { if (!Double.isNaN(kd.k[i])) { lastK = kd.k[i]; break; } }
+        double lastK = list.get(validIdx.get(validIdx.size() - 1)).kdK;
 
+        int n = list.size();
         return new ScreenerResult(
                 info.ticker, info.name, info.industry,
                 avgCloseLastN(list, 60), list.get(n - 1).getClose(),

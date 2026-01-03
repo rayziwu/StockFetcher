@@ -214,20 +214,28 @@ public void fetchStockDataAsync(String symbol, String interval, long startTimeLi
     }
 
     private void calculateDMI(List<StockDayPrice> prices, int period) {
-        if (prices.size() <= period) return;
+        if (prices == null || prices.size() <= period + 1) return;
 
-        int size = prices.size();
-        double[] tr = new double[size];
-        double[] dmPlus = new double[size];
-        double[] dmMinus = new double[size];
+        int n = prices.size();
 
-        // 1. 計算 TR, +DM, -DM
-        for (int i = 1; i < size; i++) {
-            double highDiff = prices.get(i).getHigh() - prices.get(i - 1).getHigh();
-            double lowDiff = prices.get(i - 1).getLow() - prices.get(i).getLow();
+        // 清空
+        for (StockDayPrice p : prices) {
+            p.dmiPDI = Double.NaN;
+            p.dmiMDI = Double.NaN;
+            p.dmiADX = Double.NaN;
+        }
 
-            dmPlus[i] = (highDiff > lowDiff && highDiff > 0) ? highDiff : 0;
-            dmMinus[i] = (lowDiff > highDiff && lowDiff > 0) ? lowDiff : 0;
+        double[] tr = new double[n];
+        double[] dmPlus = new double[n];
+        double[] dmMinus = new double[n];
+
+        // 1) TR, +DM, -DM
+        for (int i = 1; i < n; i++) {
+            double upMove = prices.get(i).getHigh() - prices.get(i - 1).getHigh();
+            double downMove = prices.get(i - 1).getLow() - prices.get(i).getLow();
+
+            dmPlus[i] = (upMove > downMove && upMove > 0) ? upMove : 0.0;
+            dmMinus[i] = (downMove > upMove && downMove > 0) ? downMove : 0.0;
 
             double h_l = prices.get(i).getHigh() - prices.get(i).getLow();
             double h_pc = Math.abs(prices.get(i).getHigh() - prices.get(i - 1).getClose());
@@ -235,43 +243,71 @@ public void fetchStockDataAsync(String symbol, String interval, long startTimeLi
             tr[i] = Math.max(h_l, Math.max(h_pc, l_pc));
         }
 
-        // 2. 平滑計算 TRn, DMn
-        double smoothTR = 0, smoothPlus = 0, smoothMinus = 0;
+        // 2) Wilder smoothing 初始化（i=1..period）
+        double smTR = 0.0, smP = 0.0, smM = 0.0;
         for (int i = 1; i <= period; i++) {
-            smoothTR += tr[i];
-            smoothPlus += dmPlus[i];
-            smoothMinus += dmMinus[i];
+            smTR += tr[i];
+            smP += dmPlus[i];
+            smM += dmMinus[i];
         }
 
-        for (int i = period; i < size; i++) {
+        // 從 index=period 開始有 DI / DX
+        double[] dx = new double[n];
+        for (int i = 0; i < n; i++) dx[i] = Double.NaN;
+
+        for (int i = period; i < n; i++) {
             if (i > period) {
-                smoothTR = smoothTR - (smoothTR / period) + tr[i];
-                smoothPlus = smoothPlus - (smoothPlus / period) + dmPlus[i];
-                smoothMinus = smoothMinus - (smoothMinus / period) + dmMinus[i];
+                smTR = smTR - (smTR / period) + tr[i];
+                smP  = smP  - (smP  / period) + dmPlus[i];
+                smM  = smM  - (smM  / period) + dmMinus[i];
             }
 
-            if (smoothTR != 0) {
-                prices.get(i).dmiPDI = (smoothPlus / smoothTR) * 100;
-                prices.get(i).dmiMDI = (smoothMinus / smoothTR) * 100;
-            }
+            if (smTR <= 0) continue;
 
-            // 3. 計算 DX 與 ADX
-            double pdi = prices.get(i).dmiPDI;
-            double mdi = prices.get(i).dmiMDI;
-            double dx = (pdi + mdi == 0) ? 0 : (Math.abs(pdi - mdi) / (pdi + mdi)) * 100;
+            double pdi = (smP / smTR) * 100.0;
+            double mdi = (smM / smTR) * 100.0;
+            prices.get(i).dmiPDI = pdi;
+            prices.get(i).dmiMDI = mdi;
 
-            // 簡單化處理：此處可再對 dx 進行一次 period 平均得到 ADX
-            if (i == period) prices.get(i).dmiADX = dx;
-            else prices.get(i).dmiADX = (prices.get(i - 1).dmiADX * (period - 1) + dx) / period;
+            double denom = pdi + mdi;
+            if (denom == 0) continue;
+
+            dx[i] = (Math.abs(pdi - mdi) / denom) * 100.0;
+        }
+
+        // 3) ADX（標準）：第一個 ADX = 前 period 個 DX 的平均
+        int adxStart = period * 2; // 第一個 ADX 位置（Wilder）
+        if (adxStart >= n) return;
+
+        double sumDx = 0.0;
+        int cnt = 0;
+        for (int i = period; i < adxStart; i++) {
+            if (!Double.isNaN(dx[i])) { sumDx += dx[i]; cnt++; }
+        }
+        if (cnt < period) return; // DX 不足，不計 ADX
+
+        double adx = sumDx / period;
+        prices.get(adxStart - 1).dmiADX = adx;
+
+        // 4) 後續 ADX smoothing
+        for (int i = adxStart; i < n; i++) {
+            if (Double.isNaN(dx[i])) continue;
+            adx = (adx * (period - 1) + dx[i]) / period;
+            prices.get(i).dmiADX = adx;
         }
     }
     private void calculateRSI(List<StockDayPrice> prices, int period) {
-        if (prices.size() <= period) return;
+        if (prices == null || prices.size() <= period) return;
 
-        double avgGain = 0;
-        double avgLoss = 0;
+        // 清空舊值（可選但建議，避免沿用）
+        for (StockDayPrice p : prices) {
+            p.rsi = Double.NaN;
+        }
 
-        // 1. 計算第一個平均漲跌 (SMA 方式初始化)
+        double avgGain = 0.0;
+        double avgLoss = 0.0;
+
+        // 1) 初始化：使用前 period 次差分（i=1..period）
         for (int i = 1; i <= period; i++) {
             double diff = prices.get(i).getClose() - prices.get(i - 1).getClose();
             if (diff >= 0) avgGain += diff;
@@ -280,55 +316,83 @@ public void fetchStockDataAsync(String symbol, String interval, long startTimeLi
         avgGain /= period;
         avgLoss /= period;
 
-        // 2. 使用平滑移動平均計算後續 RSI
-        for (int i = period; i < prices.size(); i++) {
+        // 2) 先設定第一個 RSI（位置：period）
+        prices.get(period).rsi = (avgLoss == 0)
+                ? 100.0
+                : 100.0 - (100.0 / (1.0 + (avgGain / avgLoss)));
+
+        // 3) Wilder smoothing：從 period+1 開始
+        for (int i = period + 1; i < prices.size(); i++) {
             double diff = prices.get(i).getClose() - prices.get(i - 1).getClose();
-            double gain = diff >= 0 ? diff : 0;
-            double loss = diff < 0 ? -diff : 0;
+            double gain = (diff > 0) ? diff : 0.0;
+            double loss = (diff < 0) ? -diff : 0.0;
 
             avgGain = (avgGain * (period - 1) + gain) / period;
             avgLoss = (avgLoss * (period - 1) + loss) / period;
 
             if (avgLoss == 0) {
-                prices.get(i).rsi = 100;
+                prices.get(i).rsi = 100.0;
             } else {
                 double rs = avgGain / avgLoss;
-                prices.get(i).rsi = 100 - (100 / (1 + rs));
+                prices.get(i).rsi = 100.0 - (100.0 / (1.0 + rs));
             }
         }
     }
 
 
     // 計算移動平均線 (MA) 方法 (保持不變)
+    // 計算移動平均線 (MA) — 修正為正確 rolling MA
     private void calculateMovingAverages(List<StockDayPrice> prices, String interval) {
-        int dataSize = prices.size();
+        if (prices == null || prices.isEmpty()) return;
 
-        // 根據時間間隔設定 MA 週期
-        int[] maPeriods;
+        // 先清空，避免沿用舊值（可選，但建議）
+        for (StockDayPrice p : prices) {
+            p.ma35 = Double.NaN;
+            p.ma60 = Double.NaN;
+            p.ma120 = Double.NaN;
+            p.ma200 = Double.NaN;
+            p.ma240 = Double.NaN;
+        }
+
+        final int dataSize = prices.size();
+
+        // 根據時間間隔設定 MA 週期（沿用你原本的）
+        final int[] maPeriods;
         switch (interval) {
             case "1h":
             case "1wk":
-                maPeriods = new int[]{5, 10, 20, 35, 200};
+                maPeriods = new int[]{35, 200};
                 break;
             case "1mo":
-                maPeriods = new int[]{5, 10, 20, 60, 120};
+                maPeriods = new int[]{60, 120};
                 break;
             case "1d":
             default:
-                maPeriods = new int[]{5, 10, 20, 60, 240}; // 5, 10, 20日, 季線(60), 年線(240)
+                maPeriods = new int[]{60, 240};
                 break;
         }
 
+        // 取 close 陣列（加速）
+        final double[] close = new double[dataSize];
+        for (int i = 0; i < dataSize; i++) close[i] = prices.get(i).getClose();
+
         for (int period : maPeriods) {
-            double sum = 0;
+            if (period <= 0) continue;
+
+            double sum = 0.0;
+
             for (int i = 0; i < dataSize; i++) {
-                sum += prices.get(i).getClose();
+                sum += close[i];
+
+                // 維持 window 大小 = period
+                if (i >= period) {
+                    sum -= close[i - period];
+                }
 
                 if (i >= period - 1) {
-                    // 計算平均值
                     double ma = sum / period;
 
-                    // 將結果存入對應的 StockDayPrice 欄位
+                    // 只寫回你有用到/有欄位的 MA
                     if (period == 35) {
                         prices.get(i).ma35 = ma;
                     } else if (period == 60) {
@@ -340,9 +404,6 @@ public void fetchStockDataAsync(String symbol, String interval, long startTimeLi
                     } else if (period == 240) {
                         prices.get(i).ma240 = ma;
                     }
-
-                    // 減去最舊的數值以準備下一個週期的計算
-                    sum -= prices.get(i - period + 1).getClose();
                 }
             }
         }
