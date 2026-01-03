@@ -74,7 +74,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private int pMacdDivBars = 2;
     private String pMacdDivTf = "時";
     private String pMacdDivSide = "底";
-    private PendingParams pendingParams = new PendingParams();
+
     private static final String PREF_INDUSTRIES = "selected_industries";
     private Button screenerButton;
     // 篩選完成後是否已自動存檔（避免重複寫檔）
@@ -2092,8 +2092,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return;
         }
 
-        calculateMACD(cleanedFull);
-        calculateKDJ(cleanedFull, currentInterval);
+
+        setKDJinterval(currentInterval);
+        //calculateKDJ(cleanedFull, currentInterval);
         calculateVolumeProfile(cleanedFull);
 
         List<StockDayPrice> displayedList = getDisplayedList(cleanedFull);
@@ -2107,11 +2108,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         coordinateMarker = new CoordinateMarkerView(this, displayedList);
         coordinateMarker.setChartView(mainChart);
         mainChart.setMarker(coordinateMarker);
-
-
-      //  calculateKDJ(displayedList, currentInterval);
-      //  calculateMACD(displayedList);
-      //  calculateVolumeProfile(displayedList);
 
         MyXAxisFormatter dateFormatter = new MyXAxisFormatter(displayedList);
         mainChart.getXAxis().setValueFormatter(dateFormatter);
@@ -2202,89 +2198,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         int maDays = 20;   // for N days
     }
 
-    private void calculateKDJ(List<StockDayPrice> prices, String interval) {
-        final int smoothK = 3, dPeriod = 3;
-
-        final int N;
+    private void setKDJinterval(String interval) {
         if ("1h".equals(interval) || "1d".equals(interval)) {
-            N = 40;
+            currentKDNPeriod = 40;
         } else {
-            N = 9;
+            currentKDNPeriod = 9;
         }
-        currentKDNPeriod = N;
-        if (prices == null || prices.size() < N) return;
-
-        int n = prices.size();
-
-        // 先把 kdK/kdD 清空，避免沿用舊值
-        for (StockDayPrice p : prices) {
-            p.kdK = Double.NaN;
-            p.kdD = Double.NaN;
-        }
-
-        double[] kRaw = new double[n];
-        double[] k = new double[n];
-        double[] d = new double[n];
-
-        for (int i = 0; i < n; i++) {
-            kRaw[i] = Double.NaN;
-            k[i] = Double.NaN;
-            d[i] = Double.NaN;
-        }
-
-        // 1) RSV / %K raw
-        for (int i = N - 1; i < n; i++) {
-            double ll = Double.POSITIVE_INFINITY;
-            double hh = Double.NEGATIVE_INFINITY;
-
-            for (int j = i - N + 1; j <= i; j++) {
-                ll = Math.min(ll, prices.get(j).getLow());
-                hh = Math.max(hh, prices.get(j).getHigh());
-            }
-
-            double denom = hh - ll;
-            if (denom <= 0) {
-                // 對齊 Python：denom==0 -> NaN（rolling mean 會讓後面也 NaN）
-                continue;
-            }
-            double close = prices.get(i).getClose();
-            kRaw[i] = 100.0 * (close - ll) / denom;
-        }
-
-        // 2) K = SMA(kRaw, 3)
-        smaStrict(kRaw, smoothK, k);
-
-        // 3) D = SMA(K, 3)
-        smaStrict(k, dPeriod, d);
-
-        // 回寫到物件
-        for (int i = 0; i < n; i++) {
-            prices.get(i).kdK = k[i];
-            prices.get(i).kdD = d[i];
-        }
-    }
-
-    private static void smaStrict(double[] src, int window, double[] dst) {
-        int n = src.length;
-        for (int i = 0; i < n; i++) dst[i] = Double.NaN;
-        if (window <= 0) return;
-
-        for (int i = window - 1; i < n; i++) {
-            double sum = 0.0;
-            for (int j = i - window + 1; j <= i; j++) {
-                double v = src[j];
-                if (Double.isNaN(v)) { // 只要視窗內有 NaN，就不產生值（對齊你 ScreenerEngine / 常見 rolling 行為）
-                    sum = Double.NaN;
-                    break;
-                }
-                sum += v;
-            }
-            if (!Double.isNaN(sum)) dst[i] = sum / window;
-        }
-    }
-
-    private void calculateMACD(List<StockDayPrice> prices) {
-        MacdCalculator.calculateMACD(prices);
     }
 
     private LineData generateKDLineData(List<StockDayPrice> displayedList) {
@@ -3136,22 +3055,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         indicatorChart.notifyDataSetChanged();
     }
 
-    public static class PendingParams {
-        public int ltThr = 20;
-        public int ltDays = 20;
-
-        public int gtThr = 45;
-        public int gtMin = 20;
-        public int gtMax = 30;
-
-        public int maBandPct = 3;
-        public int maDays = 20;
-
-        // ✅ 新增：MACD 背離參數（預設值）
-        public int macdDivBars = 2;
-        public String macdDivTf = "時";     // 或 "HOUR"
-        public String macdDivSide = "底";   // 或 "BOTTOM"
-    }
     // Scatter shape renderers
     public static class CustomAsteriskRenderer implements com.github.mikephil.charting.renderer.scatter.IShapeRenderer {
         @Override

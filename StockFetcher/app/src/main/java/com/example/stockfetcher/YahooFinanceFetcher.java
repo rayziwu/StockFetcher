@@ -148,7 +148,7 @@ public void fetchStockDataAsync(String symbol, String interval, long startTimeLi
                 // 4. 計算 KD 指標 (KD)
                 if (interval.equals("1h") || interval.equals("1d")) {
                     // 週期 40: 採用 (40, 14, 3)
-                    calculateKD(result, 40, 14, 3);
+                    calculateKD(result, 40, 3, 3);
                 } else {
                     // 週期 9: 採用標準的 (9, 3, 3)
                     calculateKD(result, 9, 3, 3);
@@ -349,191 +349,157 @@ public void fetchStockDataAsync(String symbol, String interval, long startTimeLi
     }
 
     // 計算 MACD 指標的方法 (保持不變)
+    // 計算 MACD 指標的方法（改成與 MacdCalculator 相同）
     private void calculateMACD(List<StockDayPrice> prices) {
-        int dataSize = prices.size();
+        if (prices == null || prices.isEmpty()) return;
 
-        // 1. 計算 EMA (指數移動平均線)
-        // 常用參數：12 (快線), 26 (慢線), 9 (DEA)
-        int fastPeriod = 12;
-        int slowPeriod = 26;
-        int deaPeriod = 9;
+        final int SHORT = 12;
+        final int LONG  = 26;
+        final int SIGNAL = 9;
 
-        // 輔助陣列，用於儲存 Close Price
-        double[] closes = prices.stream().mapToDouble(StockDayPrice::getClose).toArray();
+        // 清空舊值（與 MacdCalculator 相同）
+        for (StockDayPrice p : prices) {
+            p.macdDIF = Double.NaN;
+            p.macdDEA = Double.NaN;
+            p.macdHistogram = Double.NaN;
+        }
 
-        // 1a. 計算 12 日 EMA
-        double[] ema12s = calculateEMA(closes, fastPeriod);
+        int n = prices.size();
+        double[] close = new double[n];
+        for (int i = 0; i < n; i++) close[i] = prices.get(i).getClose();
 
-        // 1b. 計算 26 日 EMA
-        double[] ema26s = calculateEMA(closes, slowPeriod);
+        // ✅ ewm(adjust=false) 風格 EMA（seed=第一個 finite）
+        double[] ema12 = calculateEMA(close, SHORT);
+        double[] ema26 = calculateEMA(close, LONG);
 
-        // 2. 計算 DIF (Difference) 和 DEA (MACD Line)
-        double[] difs = new double[dataSize];
-        for (int i = 0; i < dataSize; i++) {
-            if (!Double.isNaN(ema12s[i]) && !Double.isNaN(ema26s[i])) {
-                difs[i] = ema12s[i] - ema26s[i];
-                prices.get(i).macdDIF = difs[i];
+        double[] dif = new double[n];
+        for (int i = 0; i < n; i++) {
+            if (Double.isFinite(ema12[i]) && Double.isFinite(ema26[i])) {
+                dif[i] = ema12[i] - ema26[i];
             } else {
-                difs[i] = Double.NaN;
-                prices.get(i).macdDIF = Double.NaN;
+                dif[i] = Double.NaN;
             }
         }
 
-        // 3. 計算 DEA (DIF 的 9 日 EMA)
-        double[] deas = calculateEMA(difs, deaPeriod);
+        double[] dea = calculateEMA(dif, SIGNAL);
 
-        // 4. 計算 Histogram (MACD 柱狀圖)
-        for (int i = 0; i < dataSize; i++) {
-            // 確保 DIF 和 DEA 都有值
-            if (!Double.isNaN(difs[i]) && !Double.isNaN(deas[i])) {
-                prices.get(i).macdDEA = deas[i];
-                prices.get(i).macdHistogram = prices.get(i).macdDIF - prices.get(i).macdDEA;
-            } else {
-                prices.get(i).macdDEA = Double.NaN;
-                prices.get(i).macdHistogram = Double.NaN;
+        for (int i = 0; i < n; i++) {
+            prices.get(i).macdDIF = dif[i];
+            prices.get(i).macdDEA = dea[i];
+
+            // Python: Hist = DIF - Signal（沒有 *2）
+            if (Double.isFinite(dif[i]) && Double.isFinite(dea[i])) {
+                prices.get(i).macdHistogram = dif[i] - dea[i];
             }
+            // else 保持 NaN（因為一開始已清空）
         }
     }
 
-    // EMA 計算輔助方法 (保持不變)
-    private double[] calculateEMA(double[] data, int period) {
-        int dataSize = data.length;
-        double[] emas = new double[dataSize];
-        double smoothingConstant = 2.0 / (period + 1.0);
-        double sum = 0;
-        int initialCount = 0;
+    /**
+     * 等價於 pandas: series.ewm(span=span, adjust=False).mean()
+     * alpha = 2/(span+1)
+     * ema[t] = alpha*x[t] + (1-alpha)*ema[t-1]
+     *
+     * seed：第一個 finite 值作為 ema 起點；之前維持 NaN。
+     */
+    private double[] calculateEMA(double[] x, int span) {
+        int n = x.length;
+        double[] out = new double[n];
+        for (int i = 0; i < n; i++) out[i] = Double.NaN;
+        if (n == 0 || span <= 0) return out;
 
-        // 1. 計算第一個 EMA (通常使用 SMA 作為初始值)
-        for (int i = 0; i < dataSize; i++) {
-            if (Double.isNaN(data[i])) {
-                emas[i] = Double.NaN;
-                continue;
-            }
+        double alpha = 2.0 / (span + 1.0);
 
-            sum += data[i];
-            initialCount++;
+        int first = -1;
+        for (int i = 0; i < n; i++) {
+            if (Double.isFinite(x[i])) { first = i; break; }
+        }
+        if (first < 0) return out;
 
-            if (initialCount == period) {
-                emas[i] = sum / period;
-                break;
+        out[first] = x[first];
+        for (int i = first + 1; i < n; i++) {
+            double xi = x[i];
+            if (!Double.isFinite(xi)) {
+                out[i] = out[i - 1]; // 保守處理
             } else {
-                emas[i] = Double.NaN;
+                out[i] = alpha * xi + (1.0 - alpha) * out[i - 1];
             }
         }
-
-        // 2. 計算後續的 EMA
-        for (int i = period; i < dataSize; i++) {
-            if (!Double.isNaN(emas[i-1])) {
-                // EMA(t) = (Price(t) * smoothingConstant) + (EMA(t-1) * (1 - smoothingConstant))
-                emas[i] = (data[i] * smoothingConstant) + (emas[i - 1] * (1.0 - smoothingConstant));
-            } else {
-                // 如果前一個 EMA 為 NaN，則嘗試計算 SMA
-                if (i - period + 1 >= 0) {
-                    double initialSum = 0;
-                    int count = 0;
-                    for(int j = i - period + 1; j <= i; j++) {
-                        if (!Double.isNaN(data[j])) {
-                            initialSum += data[j];
-                            count++;
-                        }
-                    }
-                    if (count == period) {
-                        emas[i] = initialSum / period;
-                    } else {
-                        emas[i] = Double.NaN;
-                    }
-                } else {
-                    emas[i] = Double.NaN;
-                }
-            }
-        }
-
-        return emas;
+        return out;
     }
 
     // 計算 KD 指標的方法 (保持不變)
-    private void calculateKD(List<StockDayPrice> prices, int n, int kPeriod, int dPeriod) {
-        int dataSize = prices.size();
+    // 計算 KD 指標的方法 — SMA(3)/SMA(3) 版本（與畫圖/篩選一致）
+    private void calculateKD(List<StockDayPrice> prices, int N, int smoothK, int dPeriod) {
+        if (prices == null) return;
+        int n = prices.size();
+        if (n < N) return;
 
-        double[] rsvs = new double[dataSize];
-        double[] ks = new double[dataSize];
-        double[] ds = new double[dataSize];
-
-        // 初始化
-        for (int i = 0; i < dataSize; i++) {
-            rsvs[i] = Double.NaN;
-            ks[i] = Double.NaN;
-            ds[i] = Double.NaN;
+        // 先把 kdK/kdD 清空，避免沿用舊值
+        for (StockDayPrice p : prices) {
+            p.kdK = Double.NaN;
+            p.kdD = Double.NaN;
         }
 
-        // 1. 計算 RSV (Raw Stochastic Value)
-        for (int i = n - 1; i < dataSize; i++) {
-            double highestHigh = 0;
-            double lowestLow = Double.MAX_VALUE;
+        double[] rsv = new double[n];
+        double[] k = new double[n];
+        double[] d = new double[n];
 
-            // 找出最近 N 天的最高價和最低價
-            for (int j = i - n + 1; j <= i; j++) {
-                if (prices.get(j).getHigh() > highestHigh) {
-                    highestHigh = prices.get(j).getHigh();
+        for (int i = 0; i < n; i++) {
+            rsv[i] = Double.NaN;
+            k[i] = Double.NaN;
+            d[i] = Double.NaN;
+        }
+
+        // 1) RSV
+        for (int i = N - 1; i < n; i++) {
+            double ll = Double.POSITIVE_INFINITY;
+            double hh = Double.NEGATIVE_INFINITY;
+
+            for (int j = i - N + 1; j <= i; j++) {
+                ll = Math.min(ll, prices.get(j).getLow());
+                hh = Math.max(hh, prices.get(j).getHigh());
+            }
+
+            double denom = hh - ll;
+            if (denom <= 0) {
+                // 與你畫圖版一致：denom<=0 => NaN
+                continue;
+            }
+
+            double close = prices.get(i).getClose();
+            rsv[i] = 100.0 * (close - ll) / denom;
+        }
+
+        // 2) K = SMA(RSV, smoothK)
+        smaStrict(rsv, smoothK, k);
+
+        // 3) D = SMA(K, dPeriod)
+        smaStrict(k, dPeriod, d);
+
+        // 回寫到物件
+        for (int i = 0; i < n; i++) {
+            prices.get(i).kdK = k[i];
+            prices.get(i).kdD = d[i];
+        }
+    }
+
+    private static void smaStrict(double[] src, int window, double[] dst) {
+        int n = src.length;
+        for (int i = 0; i < n; i++) dst[i] = Double.NaN;
+        if (window <= 0) return;
+
+        for (int i = window - 1; i < n; i++) {
+            double sum = 0.0;
+            for (int j = i - window + 1; j <= i; j++) {
+                double v = src[j];
+                if (!Double.isFinite(v)) { // 只要窗口內有 NaN/Inf，這一格就 NaN（與你畫圖 smaStrict 對齊）
+                    sum = Double.NaN;
+                    break;
                 }
-                if (prices.get(j).getLow() < lowestLow) {
-                    lowestLow = prices.get(j).getLow();
-                }
+                sum += v;
             }
-
-            double closePrice = prices.get(i).getClose();
-
-            if (highestHigh != lowestLow) {
-                // RSV = (當日收盤價 - N日內最低價) / (N日內最高價 - N日內最低價) * 100
-                rsvs[i] = ((closePrice - lowestLow) / (highestHigh - lowestLow)) * 100;
-            } else {
-                // 如果最高價等於最低價，則 RSV 為 100 (極端情況)
-                rsvs[i] = 100;
-            }
-        }
-
-        // 2. 平滑 K 值 (K-Line)
-        double kAlpha = 1.0 / kPeriod;
-
-        // K 值的初始值 (通常是第一個有效的 RSV)
-        for(int i = n - 1; i < dataSize; i++) {
-            if (!Double.isNaN(rsvs[i])) {
-                ks[i] = rsvs[i];
-                prices.get(i).kdK = ks[i];
-                break;
-            }
-        }
-
-        // 計算後續的 K 值: K(t) = K(t-1) + alpha * (RSV(t) - K(t-1))
-        for (int i = n; i < dataSize; i++) {
-            if (!Double.isNaN(rsvs[i]) && !Double.isNaN(ks[i-1])) {
-                ks[i] = ks[i-1] + kAlpha * (rsvs[i] - ks[i-1]);
-            } else if (!Double.isNaN(rsvs[i])) {
-                ks[i] = rsvs[i]; // 如果前一個 K 是 NaN，則從 RSV 開始
-            }
-            prices.get(i).kdK = ks[i];
-        }
-
-        // 3. 平滑 D 值 (D-Line)
-        double dAlpha = 1.0 / dPeriod;
-
-        // D 值的初始值 (通常是第一個有效的 K)
-        for(int i = n - 1; i < dataSize; i++) {
-            if (!Double.isNaN(ks[i])) {
-                ds[i] = ks[i];
-                prices.get(i).kdD = ds[i];
-                break;
-            }
-        }
-
-        // 計算後續的 D 值: D(t) = D(t-1) + alpha * (K(t) - D(t-1))
-        for (int i = n; i < dataSize; i++) {
-            if (!Double.isNaN(ks[i]) && !Double.isNaN(ds[i-1])) {
-                ds[i] = ds[i-1] + dAlpha * (ks[i] - ds[i-1]);
-            } else if (!Double.isNaN(ks[i])) {
-                ds[i] = ks[i]; // 如果前一個 D 是 NaN，則從 K 開始
-            }
-            prices.get(i).kdD = ds[i];
+            if (Double.isFinite(sum)) dst[i] = sum / window;
         }
     }
 

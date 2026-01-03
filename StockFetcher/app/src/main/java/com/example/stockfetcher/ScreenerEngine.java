@@ -372,7 +372,7 @@ public final class ScreenerEngine {
         // 保險：按日期排序（你資料 yyyy-MM-dd，字串排序可行；若 1h 資料日期格式不同也至少保持穩定）
         list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
 
-        MacdCalculator.calculateMACD(list);
+        //MacdCalculator.calculateMACD(list);
 
         MacdDivergenceUtil.Result div = MacdDivergenceUtil.compute(list);
         boolean ok = div.hasInLastBars(list.size(), lastBars, side);
