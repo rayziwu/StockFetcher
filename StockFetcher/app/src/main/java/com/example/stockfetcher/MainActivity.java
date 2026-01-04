@@ -176,29 +176,63 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     // 從股票清單 cache 讀到的 meta（ticker -> info）
     private final Map<String, TickerInfo> tickerMetaMap = new HashMap<>();
     private static final String TICKERS_CACHE_FILE = "股票代碼.csv";
+    private static boolean pendingInitAfterLocaleChange = false;
+    private boolean notifPermInFlight = false;
+
+    private void setScreenerEnabled(boolean enabled) {
+        screenerButton.setEnabled(enabled);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        applyLanguagePolicyBySystemLocale();
-        if (Build.VERSION.SDK_INT >= 33) {
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 100);
-                return; // 等使用者回應後再啟動篩選/Service
-            }
+
+        if (applyLanguagePolicyBySystemLocaleAndReturnIfChanged()) {
+            return;
         }
+
         setContentView(R.layout.activity_main);
         bindViews();
         initUi();
         loadSelectedIndustriesFromPrefs();
- //     showIndustryPickerAfterTickerListReady();
-
         initCharts();
         preloadTickerMetaIfCsvExists();
-        // 程式啟動時，預設繪製
-        fetchStockDataWithFallback(currentStockId, currentInterval,
-                getStartTimeLimit(currentInterval, isSwitchingInterval));
+
+        // ✅ 初始抓資料：第一次啟動 或 語言剛切換後那一輪
+        boolean shouldInitialFetch = (savedInstanceState == null) || pendingInitAfterLocaleChange;
+        pendingInitAfterLocaleChange = false;
+
+        if (shouldInitialFetch) {
+            fetchStockDataWithFallback(
+                    currentStockId,
+                    currentInterval,
+                    getStartTimeLimit(currentInterval, isSwitchingInterval)
+            );
+        }
+
+        // Android 13+：未允許通知前不讓使用者篩選
+        if (Build.VERSION.SDK_INT >= 33) {
+            boolean granted = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    == PackageManager.PERMISSION_GRANTED;
+
+            setScreenerEnabled(granted);
+
+            if (!granted && !notifPermInFlight) {
+                notifPermInFlight = true;
+                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 100);
+            }
+        } else {
+            setScreenerEnabled(true);
+        }
+    }
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 100) {
+            notifPermInFlight = false;
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            setScreenerEnabled(granted);
+        }
     }
 
     @Override
@@ -225,6 +259,17 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             screenerReceiverRegistered = false;
         }
         super.onStop();
+    }
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        // 如果目前正在等通知權限回覆，避免這時候又切語言造成重建/流程混亂
+        if (notifPermInFlight) return;
+
+        if (applyLanguagePolicyBySystemLocaleAndReturnIfChanged()) {
+            return;
+        }
     }
     private void loadSelectedIndustriesFromPrefs() {
         try {
@@ -1015,7 +1060,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row1.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         row1.setPadding(0, dp2, 0, dp2);
         row1.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        row1.addView(mkText.apply("1.KD40 <"));
+        row1.addView(mkText.apply("KD40 <"));
         row1.addView(etLtThr);
         row1.addView(mkText.apply(isZh ? "連續" : "for"));
         row1.addView(etLtDays);
@@ -1031,7 +1076,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row2.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         row2.setPadding(0, dp2, 0, dp2);
         row2.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        row2.addView(mkText.apply("2.KD40 >"));
+        row2.addView(mkText.apply("KD40 >"));
         row2.addView(etGtThr);
         row2.addView(mkText.apply(isZh ? "連續" : "for"));
         row2.addView(etGtMin);
@@ -1048,7 +1093,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row3.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         row3.setPadding(0, dp2, 0, dp2);
         row3.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        row3.addView(mkText.apply(isZh ? "3. 相較MA60 <" : "3. Differs MA60 <"));
+        row3.addView(mkText.apply(isZh ? "相較MA60 <" : "Differs MA60 <"));
         row3.addView(etMaBand);
         row3.addView(mkText.apply("%"));
         row3.addView(mkText.apply(isZh ? " 連續" : " for"));
@@ -1068,7 +1113,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row4.setClickable(true);
 
         if (isZh) {
-            row4.addView(mkText.apply("4. 最近"));
+            row4.addView(mkText.apply("最近"));
             row4.addView(etMacdBars);
             row4.addView(mkText.apply("根"));
             row4.addView(npMacdTf);
@@ -1076,7 +1121,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             row4.addView(npMacdSide);
             row4.addView(mkText.apply("部背離"));
         } else {
-            row4.addView(mkText.apply("4.Last"));
+            row4.addView(mkText.apply("Last"));
             row4.addView(etMacdBars);
             row4.addView(npMacdTf);
             row4.addView(mkText.apply("bars"));
@@ -1095,13 +1140,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row5.setClickable(true);
 
         if (isZh) {
-            row5.addView(mkText.apply("5. 最近"));
+            row5.addView(mkText.apply("最近"));
             row5.addView(etKdGcBars);
             row5.addView(mkText.apply("根"));
             row5.addView(npKdGcTf);
             row5.addView(mkText.apply("K柱 KD黃金交叉"));
         } else {
-            row5.addView(mkText.apply("5.Last"));
+            row5.addView(mkText.apply("Last"));
             row5.addView(etKdGcBars);
             row5.addView(npKdGcTf);
             row5.addView(mkText.apply("bars KD golden cross"));
@@ -1371,20 +1416,45 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
     private String getScreenerModeLabel(ScreenerMode mode) {
         if (mode == null) return "";
+
         switch (mode) {
             case LT20:
-                return getString(R.string.screener_mode_lt20);
+                return getString(
+                        R.string.screener_params_lt20,
+                        activeLtThr,
+                        activeLtDays
+                );
+
             case GT45:
-                return getString(R.string.screener_mode_gt45);
+                return getString(
+                        R.string.screener_params_gt45,
+                        activeGtThr,
+                        activeGtMin,
+                        activeGtMax
+                );
+
             case MA60_3PCT:
-                 return getString(R.string.screener_mode_ma60_3pct);
+                return getString(
+                        R.string.screener_params_ma60,
+                        activeMaBandPct,
+                        activeMaDays
+                );
+
             case MACD_DIV_RECENT:
-                return getString(R.string.screener_params_macd_div_recent,
+                return getString(
+                        R.string.screener_params_macd_div_recent,
                         activeMacdDivBars,
                         activeMacdDivTf,
-                        activeMacdDivSide);
+                        activeMacdDivSide
+                );
+
             case KD_GC_RECENT:
-                return getString(R.string.screener_mode_kd_gc_recent);
+                return getString(
+                        R.string.screener_params_kd_gc_recent,
+                        activeKdGcBars,
+                        activeKdGcTf
+                );
+
             default:
                 return mode.name();
         }
@@ -1729,29 +1799,37 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return true; // ✅ consume，避免影響 chart 自己的觸控
         });
     }
+    private boolean applyLanguagePolicyBySystemLocaleAndReturnIfChanged() {
+        java.util.Locale sys;
 
-    private void applyLanguagePolicyBySystemLocale() {
-        Locale sys;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            LocaleList sysLocales = Resources.getSystem().getConfiguration().getLocales();
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            android.app.LocaleManager lm = getSystemService(android.app.LocaleManager.class);
+            android.os.LocaleList sysLocales = (lm != null) ? lm.getSystemLocales()
+                    : android.content.res.Resources.getSystem().getConfiguration().getLocales();
+            sys = sysLocales.get(0);
+        } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            android.os.LocaleList sysLocales = android.content.res.Resources.getSystem().getConfiguration().getLocales();
             sys = sysLocales.get(0);
         } else {
-            sys = Resources.getSystem().getConfiguration().locale;
+            sys = android.content.res.Resources.getSystem().getConfiguration().locale;
         }
 
-        String lang = sys.getLanguage();
-        String country = sys.getCountry();
+        // ✅ 你的政策：只要系統語言是中文（含簡中），就強制 zh-TW；其他一律英文
+        boolean wantZhTw = "zh".equalsIgnoreCase(sys.getLanguage());
 
-        boolean forceTraditionalChinese =
-                "zh".equals(lang) && ("TW".equals(country) || "HK".equals(country) || "CN".equals(country));
+        androidx.core.os.LocaleListCompat target = wantZhTw
+                ? androidx.core.os.LocaleListCompat.forLanguageTags("zh-TW")
+                : androidx.core.os.LocaleListCompat.forLanguageTags("en");
 
-        LocaleListCompat target = forceTraditionalChinese
-                ? LocaleListCompat.forLanguageTags("zh-TW")
-                : LocaleListCompat.forLanguageTags("en");
-
-        String currentTags = AppCompatDelegate.getApplicationLocales().toLanguageTags();
+        String currentTags = androidx.appcompat.app.AppCompatDelegate.getApplicationLocales().toLanguageTags();
         String targetTags = target.toLanguageTags();
-        if (!targetTags.equals(currentTags)) AppCompatDelegate.setApplicationLocales(target);
+
+        if (!targetTags.equals(currentTags)) {
+            pendingInitAfterLocaleChange = true;
+            androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(target);
+            return true; // 會觸發重建，這輪不要再做初始化
+        }
+        return false;
     }
 
     private void updateViewModeButtonText() {
