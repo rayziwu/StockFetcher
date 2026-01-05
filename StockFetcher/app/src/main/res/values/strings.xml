@@ -86,6 +86,19 @@
     <string name="screener_params_kd_gc_recent">Last %1$d %2$s bars, KD golden cross</string>
 
     <string name="dialog_screener_done_msg_with_params">%1$s\n%2$s\nMatches: %3$d</string>
+    <string name="ticker_scrape_title">Update ticker list</string>
+
+    <string name="ticker_scrape_file_missing">File 股票代碼.csv not found or failed to load,</string>
+    <string name="ticker_scrape_start">Start scraping the latest ticker list ---</string>
+
+    <string name="ticker_market_twse">TWSE (Listed)</string>
+    <string name="ticker_market_tpex">TPEx (OTC)</string>
+
+    <string name="ticker_scrape_step_start">🔄 Scraping %1$s tickers</string>
+    <string name="ticker_scrape_step_ok">✅ Fetched %1$d tickers (%2$s).</string>
+    <string name="ticker_scrape_saved">✅ Saved the latest %1$d tickers to 股票代碼.csv</string>
+
+    <string name="ticker_scrape_failed">❌ Scrape failed: %1$s</string>
 
     <string name="div_tf_hour">Hour</string>
     <string name="div_tf_day">Day</string>

@@ -85,6 +85,19 @@
     <string name="screener_params_macd_div_recent">最近%1$d根%2$sK柱，%3$s部背離</string>
     <string name="screener_params_kd_gc_recent">最近%1$d根%2$sK柱，KD黃金交叉</string>
     <string name="dialog_screener_done_msg_with_params">%1$s\n%2$s\n筆數：%3$d</string>
+    <string name="ticker_scrape_title">更新股票清單</string>
+
+    <string name="ticker_scrape_file_missing">檔案 股票代碼.csv 不存在或載入失敗，</string>
+    <string name="ticker_scrape_start">開始爬取最新股票清單 ---</string>
+
+    <string name="ticker_market_twse">上市 (TWSE)</string>
+    <string name="ticker_market_tpex">上櫃 (TPEx)</string>
+
+    <string name="ticker_scrape_step_start">🔄 正在爬取 %1$s 股票代碼</string>
+    <string name="ticker_scrape_step_ok">✅ 成功取得 %1$d 筆（%2$s）。</string>
+    <string name="ticker_scrape_saved">✅ 最新 %1$d 筆股票清單已保存至 股票代碼.csv</string>
+
+    <string name="ticker_scrape_failed">❌ 爬取失敗：%1$s</string>
 
     <string name="div_tf_hour">時</string>
     <string name="div_tf_day">日</string>

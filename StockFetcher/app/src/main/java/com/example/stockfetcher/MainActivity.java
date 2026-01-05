@@ -356,6 +356,54 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             Log.w(TAG, "loadTickerMetaFromCsv failed: " + e.getMessage());
         }
     }
+
+    private final java.util.concurrent.ExecutorService tickerExec =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private void showTickerScrapeDialogThen(Runnable onOkContinue) {
+        // Scroll + TextView
+        final android.widget.TextView tv = new android.widget.TextView(this);
+        tv.setTextSize(14f);
+        int dp12 = Math.round(12f * getResources().getDisplayMetrics().density);
+        tv.setPadding(dp12, dp12, dp12, dp12);
+
+        final android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(tv);
+
+        final StringBuilder sb = new StringBuilder();
+
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.ticker_scrape_title)
+                .setView(sv)
+                .setCancelable(false)
+                .setPositiveButton(android.R.string.ok, null) // show 後再接管
+                .create();
+
+        dlg.show();
+
+        final android.widget.Button okBtn = dlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE);
+        okBtn.setEnabled(false);
+
+        java.util.function.Consumer<String> appendLine = (line) -> runOnUiThread(() -> {
+            sb.append(line).append('\n');
+            tv.setText(sb.toString());
+            sv.post(() -> sv.fullScroll(android.view.View.FOCUS_DOWN));
+        });
+
+        tickerExec.execute(() -> {
+            // 真的爬取
+            TwTickerRepository.loadOrScrape(getApplicationContext(), appendLine::accept);
+
+            runOnUiThread(() -> {
+                okBtn.setEnabled(true);
+                okBtn.setOnClickListener(v -> {
+                    dlg.dismiss();
+                    if (onOkContinue != null) onOkContinue.run();
+                });
+            });
+        });
+    }
+
     private void bindViews() {
         intervalSwitchButton = findViewById(R.id.intervalSwitchButton);
         viewModeButton = findViewById(R.id.viewModeButton);
@@ -1188,7 +1236,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             pLtThr  = clampInt(thr != null ? thr : 20, 0, 99);
             pLtDays = clampInt(days != null ? days : 20, 1, 99);
             dlg.dismiss();
-            prepareIndustryThenStartScreening(ScreenerMode.LT20);
+            ensureTickerFileThenStart(ScreenerMode.LT20);
         });
 
         row2.setOnClickListener(v -> {
@@ -1200,7 +1248,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             pGtMax = clampInt(mx  != null ? mx  : 30, 1, 99);
             if (pGtMin > pGtMax) { int t = pGtMin; pGtMin = pGtMax; pGtMax = t; }
             dlg.dismiss();
-            prepareIndustryThenStartScreening(ScreenerMode.GT45);
+            ensureTickerFileThenStart(ScreenerMode.GT45);
         });
 
         row3.setOnClickListener(v -> {
@@ -1209,7 +1257,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             pMaBandPct = clampInt(band != null ? band : 3, 0, 99);
             pMaDays    = clampInt(days != null ? days : 20, 1, 99);
             dlg.dismiss();
-            prepareIndustryThenStartScreening(ScreenerMode.MA60_3PCT);
+            ensureTickerFileThenStart(ScreenerMode.MA60_3PCT);
         });
 
         row4.setOnClickListener(v -> {
@@ -1220,7 +1268,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             pMacdDivSide = sideItems[npMacdSide.getValue()];
 
             dlg.dismiss();
-            prepareIndustryThenStartScreening(ScreenerMode.MACD_DIV_RECENT);
+            ensureTickerFileThenStart(ScreenerMode.MACD_DIV_RECENT);
         });
 
         row5.setOnClickListener(v -> {
@@ -1230,7 +1278,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             pKdGcTf = tfItems[npKdGcTf.getValue()]; // tfItems = getStringArray(R.array.div_tf_items)
 
             dlg.dismiss();
-            prepareIndustryThenStartScreening(ScreenerMode.KD_GC_RECENT);
+            ensureTickerFileThenStart(ScreenerMode.KD_GC_RECENT);
         });
 
         row6.setOnClickListener(v -> {
@@ -1240,7 +1288,16 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         dlg.show();
     }
+    private void ensureTickerFileThenStart(ScreenerMode mode) {
+        java.io.File f = TwTickerRepository.getCacheFile(this); // 你前面已加
+        boolean needScrape = (f == null || !f.exists());
 
+        if (needScrape) {
+            showTickerScrapeDialogThen(() -> prepareIndustryThenStartScreening(mode));
+        } else {
+            prepareIndustryThenStartScreening(mode);
+        }
+    }
     // 你原本就有 clampInt；這裡避免你沒有 clampLearned
     private int clampLearned(int v, int lo, int hi) {
         if (v < lo) return lo;

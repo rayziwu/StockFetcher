@@ -51,62 +51,76 @@ public final class TwTickerRepository {
 
     private TwTickerRepository() {}
     // 從股票清單 cache 讀到的 meta（ticker -> info）
+    public interface ScrapeProgressListener {
+        void onLine(String msg);
+    }
 
+    public static final String CACHE_NAME = "股票代碼.csv";
+
+    public static File getCacheFile(Context ctx) {
+        File dir = ctx.getExternalFilesDir(null);
+        return (dir == null) ? null : new File(dir, CACHE_NAME);
+    }
     /** 對齊 Python：先讀檔；失敗才爬取；成功後寫回 CSV（含 Name/Industry） */
     public static List<TickerInfo> loadOrScrape(Context ctx) {
+        return loadOrScrape(ctx, null);
+    }
+    public static List<TickerInfo> loadOrScrape(Context ctx, @androidx.annotation.Nullable ScrapeProgressListener cb) {
         lastError = "";
 
+        // 1) 先讀 cache
         List<TickerInfo> cached = readCache(ctx);
         if (cached != null && !cached.isEmpty()) return cached;
 
+        // 2) 沒 cache -> 顯示你指定的訊息
+        if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_file_missing));
+        if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_start));
+
         List<TickerInfo> out = new ArrayList<>();
 
-        // 股票（你本來的）
-        out.addAll(scrapeTickers("2", ".TW",  "上市股票 (TWSE)"));
-        out.addAll(scrapeTickers("4", ".TWO", "上櫃股票 (TPEx)"));
-
-        // 由頁面 option 自動找 ETF/ETN 的 strMode
-        List<StrModeOpt> opts = discoverStrModesFromPage("2");
-        for (StrModeOpt opt : opts) {
-            android.util.Log.d("TwTickerRepository", "strMode option: " + opt.value + " => " + opt.label);
+        // 上市
+        String twseName = ctx.getString(R.string.ticker_market_twse);
+        if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_step_start, twseName));
+        List<TickerInfo> twse = scrapeTickers("2", ".TW", "上市股票 (TWSE)");
+        if (twse != null && !twse.isEmpty()) {
+            out.addAll(twse);
+            if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_step_ok, twse.size(), twseName));
+        } else {
+            if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_failed, getLastError()));
         }
 
-        for (StrModeOpt opt : opts) {
-            if (isEtfOrEtnLabel(opt.label)) {
-                // suffix 空字串，讓 scrapeTickers() 依「市場別」決定 .TW/.TWO
-                out.addAll(scrapeTickers(opt.value, "", opt.label));
-            }
+        // 上櫃
+        String tpexName = ctx.getString(R.string.ticker_market_tpex);
+        if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_step_start, tpexName));
+        List<TickerInfo> tpex = scrapeTickers("4", ".TWO", "上櫃股票 (TPEx)");
+        if (tpex != null && !tpex.isEmpty()) {
+            out.addAll(tpex);
+            if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_step_ok, tpex.size(), tpexName));
+        } else {
+            if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_failed, getLastError()));
         }
 
-        // 去重
+        // 去重（同 ticker 只留一筆）
         if (!out.isEmpty()) {
             java.util.LinkedHashMap<String, TickerInfo> uniq = new java.util.LinkedHashMap<>();
             for (TickerInfo ti : out) {
                 if (ti == null || ti.ticker == null) continue;
-                String key = ti.ticker.trim().toUpperCase(Locale.US);
+                String key = ti.ticker.trim().toUpperCase(java.util.Locale.US);
                 if (key.isEmpty()) continue;
                 if (!uniq.containsKey(key)) uniq.put(key, ti);
             }
             out = new ArrayList<>(uniq.values());
         }
 
-        // 統計：00 開頭（常見 ETF）+ 5 碼（例如 00692）
-        int etfLike = 0;
-        int fiveDigit = 0;
-        for (TickerInfo ti : out) {
-            if (ti == null || ti.ticker == null) continue;
-            if (ti.ticker.matches("^00\\d{2}\\.(TW|TWO)$")) etfLike++;
-            if (ti.ticker.matches("^\\d{5}\\.(TW|TWO)$")) fiveDigit++;
-        }
-        android.util.Log.d("TwTickerRepository", "Total tickers=" + out.size()
-                + " etfLike(00xx)=" + etfLike + " fiveDigit=" + fiveDigit);
-
+        // 寫入 cache
         if (!out.isEmpty()) {
             writeCache(ctx, out);
-            return out;
+            if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_saved, out.size()));
+        } else {
+            if (getLastError().isEmpty()) setErr("Ticker list empty: cache empty and scrape returned 0", null);
+            if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_failed, getLastError()));
         }
 
-        if (getLastError().isEmpty()) setErr("Ticker list empty: cache empty and scrape returned 0", null);
         return out;
     }
 
