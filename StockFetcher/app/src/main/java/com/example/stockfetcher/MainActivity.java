@@ -1924,12 +1924,15 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         return "^TWII";
     }
 
-    // 統一：若是 4 位數字且無後綴，走 .TW / .TWO fallback；否則直接抓
+    // 統一：若是 4,5 位數字且無後綴，走 .TW / .TWO fallback；否則直接抓
     private void fetchSymbolAutoFallback(String symbol, String interval, long startTime,
                                          YahooFinanceFetcher.DataFetchListener listener) {
         String base = symbol.toUpperCase(Locale.US).trim();
 
-        boolean needFallback = base.matches("^\\d{4}$") && !base.startsWith("^") && !base.contains(".");
+        boolean needFallback = !base.startsWith("^")
+                && !base.contains(".")
+                && base.matches("^\\d{4,5}$");  // ✅ 4或5位都補尾碼
+
         if (!needFallback) {
             yahooFinanceFetcher.fetchStockDataAsync(base, interval, startTime, listener);
             return;

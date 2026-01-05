@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
+import java.util.LinkedHashMap;
 
 public final class TwTickerRepository {
 
@@ -55,14 +56,50 @@ public final class TwTickerRepository {
     public static List<TickerInfo> loadOrScrape(Context ctx) {
         lastError = "";
 
-        // 1) 先讀 cache
         List<TickerInfo> cached = readCache(ctx);
         if (cached != null && !cached.isEmpty()) return cached;
 
-        // 2) 爬取 TWSE/TPEx
         List<TickerInfo> out = new ArrayList<>();
-        out.addAll(scrapeTickers("2", ".TW", "上市 (TWSE)"));
-        out.addAll(scrapeTickers("4", ".TWO", "上櫃 (TPEx)"));
+
+        // 股票（你本來的）
+        out.addAll(scrapeTickers("2", ".TW",  "上市股票 (TWSE)"));
+        out.addAll(scrapeTickers("4", ".TWO", "上櫃股票 (TPEx)"));
+
+        // 由頁面 option 自動找 ETF/ETN 的 strMode
+        List<StrModeOpt> opts = discoverStrModesFromPage("2");
+        for (StrModeOpt opt : opts) {
+            android.util.Log.d("TwTickerRepository", "strMode option: " + opt.value + " => " + opt.label);
+        }
+
+        for (StrModeOpt opt : opts) {
+            if (isEtfOrEtnLabel(opt.label)) {
+                // suffix 空字串，讓 scrapeTickers() 依「市場別」決定 .TW/.TWO
+                out.addAll(scrapeTickers(opt.value, "", opt.label));
+            }
+        }
+
+        // 去重
+        if (!out.isEmpty()) {
+            java.util.LinkedHashMap<String, TickerInfo> uniq = new java.util.LinkedHashMap<>();
+            for (TickerInfo ti : out) {
+                if (ti == null || ti.ticker == null) continue;
+                String key = ti.ticker.trim().toUpperCase(Locale.US);
+                if (key.isEmpty()) continue;
+                if (!uniq.containsKey(key)) uniq.put(key, ti);
+            }
+            out = new ArrayList<>(uniq.values());
+        }
+
+        // 統計：00 開頭（常見 ETF）+ 5 碼（例如 00692）
+        int etfLike = 0;
+        int fiveDigit = 0;
+        for (TickerInfo ti : out) {
+            if (ti == null || ti.ticker == null) continue;
+            if (ti.ticker.matches("^00\\d{2}\\.(TW|TWO)$")) etfLike++;
+            if (ti.ticker.matches("^\\d{5}\\.(TW|TWO)$")) fiveDigit++;
+        }
+        android.util.Log.d("TwTickerRepository", "Total tickers=" + out.size()
+                + " etfLike(00xx)=" + etfLike + " fiveDigit=" + fiveDigit);
 
         if (!out.isEmpty()) {
             writeCache(ctx, out);
@@ -71,6 +108,72 @@ public final class TwTickerRepository {
 
         if (getLastError().isEmpty()) setErr("Ticker list empty: cache empty and scrape returned 0", null);
         return out;
+    }
+
+    private static final class StrModeOpt {
+        final String value;
+        final String label;
+        StrModeOpt(String v, String l) { value = v; label = l; }
+    }
+
+    private static List<StrModeOpt> discoverStrModesFromPage(String anyWorkingStrMode) {
+        List<StrModeOpt> out = new ArrayList<>();
+        HttpURLConnection conn = null;
+
+        try {
+            String urlStr = BASE_URL + "?strMode=" + anyWorkingStrMode;
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(20000);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            conn.setRequestProperty("Accept-Encoding", "gzip");
+            conn.setRequestProperty("Connection", "close");
+
+            if (conn.getResponseCode() != 200) return out;
+
+            InputStream is = conn.getInputStream();
+            String enc = conn.getContentEncoding();
+            if (enc != null && enc.toLowerCase(Locale.US).contains("gzip")) is = new GZIPInputStream(is);
+
+            byte[] bytes = readAllBytes(is);
+            String html = decodeCp950BestEffort(bytes);
+
+            Document doc = Jsoup.parse(html);
+
+            // 有的頁面 name 是 strMode，有的可能是 id=strMode，兩種都找
+            Element sel = doc.selectFirst("select[name=strMode], select#strMode");
+            if (sel == null) return out;
+
+            for (Element opt : sel.select("option")) {
+                String v = opt.attr("value").trim();
+                String t = opt.text().trim();
+                if (!v.isEmpty() && !t.isEmpty()) out.add(new StrModeOpt(v, t));
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+
+        return out;
+    }
+
+    private static boolean isEtfOrEtnLabel(String label) {
+        if (label == null) return false;
+
+        // 英文
+        String u = label.toUpperCase(Locale.US);
+        if (u.contains("ETF") || u.contains("ETN")) return true;
+
+        // 常見中文關鍵字（ISIN 頁面常會出現）
+        return label.contains("ETF")
+                || label.contains("ETN")
+                || label.contains("指數股票型基金")
+                || label.contains("指數投資證券")
+                || label.contains("受益證券");
     }
 
     // -----------------------
@@ -173,12 +276,12 @@ public final class TwTickerRepository {
 
             conn.setRequestProperty("User-Agent", UA);
             conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-            conn.setRequestProperty("Accept-Encoding", "gzip"); // gzip
+            conn.setRequestProperty("Accept-Encoding", "gzip");
             conn.setRequestProperty("Connection", "close");
 
             int code = conn.getResponseCode();
             if (code != 200) {
-                setErr("Scrape " + marketName + " HTTP " + code, null);
+                setErr("Scrape " + marketName + " HTTP " + code + " (strMode=" + strMode + ")", null);
                 return out;
             }
 
@@ -189,28 +292,22 @@ public final class TwTickerRepository {
             }
 
             byte[] bytes = readAllBytes(is);
-
-            // 對齊 Python：response.encoding = "cp950"
-            // Android/Java：用 MS950 / Big5 嘗試解碼
             String html = decodeCp950BestEffort(bytes);
 
-            // 解析 HTML table（對齊 Python 的 pd.read_html）
             Document doc = Jsoup.parse(html);
 
-            // Python 用 dfs[0]（第一個表）；但為了穩：先找包含關鍵欄位的 table
             Element table = findTableContaining(doc, "有價證券代號及名稱");
             if (table == null) {
-                setErr("Scrape " + marketName + " failed: no table found", null);
+                setErr("Scrape " + marketName + " failed: no table found (strMode=" + strMode + ")", null);
                 return out;
             }
 
             Elements trs = table.select("tr");
             if (trs.isEmpty()) {
-                setErr("Scrape " + marketName + " failed: table empty", null);
+                setErr("Scrape " + marketName + " failed: table empty (strMode=" + strMode + ")", null);
                 return out;
             }
 
-            // header row：對齊 Python df.columns = df.iloc[0]
             int headerIdx = -1;
             List<String> headers = null;
 
@@ -226,13 +323,13 @@ public final class TwTickerRepository {
             }
 
             if (headerIdx < 0 || headers == null) {
-                setErr("Scrape " + marketName + " failed: header row not found", null);
+                setErr("Scrape " + marketName + " failed: header row not found (strMode=" + strMode + ")", null);
                 return out;
             }
 
             int colCodeName = indexOfHeader(headers, "有價證券代號及名稱");
             if (colCodeName < 0) {
-                setErr("Scrape " + marketName + " failed: missing col 有價證券代號及名稱", null);
+                setErr("Scrape " + marketName + " failed: missing col 有價證券代號及名稱 (strMode=" + strMode + ")", null);
                 return out;
             }
 
@@ -249,13 +346,53 @@ public final class TwTickerRepository {
                 CodeName cn = splitCodeName(codeName);
                 if (cn.code == null) continue;
 
-                String ticker = cn.code + suffix;
+                // 必須是 4~6 位純數字
+                if (!cn.code.matches("\\d{4,6}")) continue;
 
+                // ✅ 排除權證/衍生性商品：名稱常含「購」「售」（你例子就是 54購02）
+                String nm = (cn.name == null) ? "" : cn.name;
+                if (nm.contains("購") || nm.contains("售")) continue;
+
+                // ✅ 代碼規則：
+                // - 4~5 位：全部允許（股票 + 多數 ETF/ETN）
+                // - 6 位：只允許 00xxxx 或 02xxxx（避免 701029 類權證）
+                if (cn.code.length() == 6) {
+                    if (!(cn.code.startsWith("00") || cn.code.startsWith("02"))) continue;
+                }
+
+                // 市場別決定尾碼；非上市/上櫃跳過（避免創櫃/興櫃）
+                String market = "";
+                if (colMarket >= 0 && colMarket < cells.size()) {
+                    market = cells.get(colMarket).text().trim();
+                }
+
+                String rowSuffix = null;
+                if (!market.isEmpty()) {
+                    if (market.contains("上市")) rowSuffix = ".TW";
+                    else if (market.contains("上櫃")) rowSuffix = ".TWO";
+                    else continue;
+                } else if (suffix != null && !suffix.trim().isEmpty()) {
+                    rowSuffix = suffix.trim();
+                } else {
+                    continue;
+                }
+
+                String ticker = cn.code + rowSuffix;
+
+                // industry 先照你原本邏輯（股票不要被動）
                 String industry = "";
-                if (colIndustry >= 0 && colIndustry < cells.size()) industry = cells.get(colIndustry).text().trim();
-                if (industry.isEmpty() && colMarket >= 0 && colMarket < cells.size())
-                    industry = cells.get(colMarket).text().trim();
+                if (colIndustry >= 0 && colIndustry < cells.size()) {
+                    industry = cells.get(colIndustry).text().trim();
+                }
+                if (industry.isEmpty() && !market.isEmpty()) industry = market;
                 if (industry.isEmpty()) industry = marketName;
+
+                // ✅ 只在 industry 是 fallback「上市/上櫃」時，依代碼前綴改成 ETF/ETN
+                // 這樣股票真正產業別（半導體等）不會被改
+                if ("上市".equals(industry) || "上櫃".equals(industry)) {
+                    if (cn.code.startsWith("02")) industry = "ETN";
+                    else if (cn.code.startsWith("00")) industry = "ETF";
+                }
 
                 String key = ticker.toUpperCase(Locale.US);
                 if (!seen.add(key)) continue;
@@ -263,18 +400,19 @@ public final class TwTickerRepository {
                 out.add(new TickerInfo(ticker, cn.name, industry));
             }
 
-            if (out.isEmpty()) setErr("Scrape " + marketName + " got 0 tickers (parsed but no rows)", null);
+            if (out.isEmpty()) {
+                setErr("Scrape " + marketName + " got 0 tickers (strMode=" + strMode + ")", null);
+            }
             return out;
 
         } catch (Exception e) {
-            setErr("Scrape " + marketName + " exception: " + e.getMessage(), e);
+            setErr("Scrape " + marketName + " exception (strMode=" + strMode + "): " + e.getMessage(), e);
             return out;
         } finally {
             if (conn != null) conn.disconnect();
         }
     }
-
-    private static Element findTableContaining(Document doc, String mustContain) {
+        private static Element findTableContaining(Document doc, String mustContain) {
         Elements tables = doc.select("table");
         if (tables.isEmpty()) return null;
 
@@ -303,19 +441,18 @@ public final class TwTickerRepository {
         CodeName(String code, String name) { this.code = code; this.name = name; }
     }
 
-    private static CodeName splitCodeName(String cell) {
-        if (cell == null) return new CodeName(null, "");
-        String s = cell.trim();
+    private static CodeName splitCodeName(String codeName) {
+        if (codeName == null) return new CodeName(null, "");
+        String s = codeName.replace('\u3000', ' ').trim();  // 全形空白轉半形
         if (s.isEmpty()) return new CodeName(null, "");
 
-        // Python: parts = s.split("\u3000")  # 全形空白
-        String[] parts = s.split("\u3000");
-        String code = (parts.length > 0) ? parts[0].trim() : "";
-        StringBuilder name = new StringBuilder();
-        for (int i = 1; i < parts.length; i++) name.append(parts[i].trim());
+        String[] parts = s.split("\\s+", 2);
+        String code = parts[0].trim();
+        String name = (parts.length >= 2) ? parts[1].trim() : "";
 
-        if (code.matches("^\\d{4}$")) return new CodeName(code, name.toString().trim());
-        return new CodeName(null, name.toString().trim());
+        // 只要是數字就收，長度後面再由 scrapeTickers 判斷
+        if (!code.matches("\\d+")) return new CodeName(null, "");
+        return new CodeName(code, name);
     }
 
     // -----------------------
