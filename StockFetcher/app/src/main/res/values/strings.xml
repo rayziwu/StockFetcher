@@ -99,6 +99,9 @@
     <string name="ticker_scrape_saved">✅ Saved the latest %1$d tickers to 股票代碼.csv</string>
 
     <string name="ticker_scrape_failed">❌ Scrape failed: %1$s</string>
+    <string name="indicator_mode_macd">MACD</string>
+    <string name="indicator_mode_rsi">RSI</string>
+    <string name="indicator_mode_dmi">DMI</string>
 
     <string name="div_tf_hour">Hour</string>
     <string name="div_tf_day">Day</string>

@@ -22,6 +22,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -119,15 +120,17 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     private YahooFinanceFetcher yahooFinanceFetcher;
 
-    private Button intervalSwitchButton, viewModeButton, indicatorModeButton;
+    private Button intervalSwitchButton;
     private EditText stockIdEditText, startDateEditText, comparisonStockIdEditText;
 
     private boolean isSwitchingInterval = false;
     private boolean suppressNextStockIdFocusFetch = false;
 
     private String currentStockId = "2330.TW";
-    private final String[] VIEW_MODES = {"ALL", "K", "Vo", "VP"};
-    private int currentViewModeIndex = 0;
+    private final String[] VIEW_MODES = {"K", "Vo", "VP", "ALL"};
+    private int currentViewModeIndex = 3; // 預設 ALL
+    private List<StockDayPrice> lastDisplayedListForMain = null;
+    private GestureDetector mainTapDetector;
 
     private final String[] INTERVALS = {"1d", "1wk", "1mo", "1h"};
     private int currentIntervalIndex = 0;
@@ -146,6 +149,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     private int pMaBandPct = 3;
     private int pMaDays = 20;
+
+    private TextView indicatorModeLabel;
+    private List<StockDayPrice> lastDisplayedListForIndicator = null;
+    private enum KkdViewMode { KD_ONLY, COMPARE_ONLY, BOTH }
+    private KkdViewMode kkdViewMode = KkdViewMode.BOTH;
+
+    @androidx.annotation.Nullable
+    private List<StockDayPrice> lastDisplayedListForKkd;
 
     private static int clampInt(int v, int lo, int hi) {
         if (v < lo) return lo;
@@ -406,8 +417,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     private void bindViews() {
         intervalSwitchButton = findViewById(R.id.intervalSwitchButton);
-        viewModeButton = findViewById(R.id.viewModeButton);
-        indicatorModeButton = findViewById(R.id.indicatorModeButton);
+        indicatorModeLabel = findViewById(R.id.indicatorModeLabel);
+// indicatorModeButton 相關 findViewById / setOnClickListener 全部刪掉
 
         startDateEditText = findViewById(R.id.startDateEditText);
         comparisonStockIdEditText = findViewById(R.id.comparisonStockIdEditText);
@@ -426,26 +437,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         displayText = getResources().getStringArray(R.array.interval_display_text);
         intervalSwitchButton.setText(displayText[currentIntervalIndex]);
-
-        // view mode button：固定高度 + 初始文字 + 切換
-        //viewModeButton.getLayoutParams().height =
-        //        (int) (24 * getResources().getDisplayMetrics().density);
-        updateViewModeButtonText();
-        viewModeButton.setOnClickListener(v -> {
-            currentViewModeIndex = (currentViewModeIndex + 1) % VIEW_MODES.length;
-            updateViewModeButtonText();
-            if (fullPriceList != null && !fullPriceList.isEmpty()) drawCharts(fullPriceList, currentStockId);
-        });
-
-        // indicator mode button：切換
-        updateIndicatorModeButtonText();
-        indicatorModeButton.setOnClickListener(v -> {
-            indicatorMode = (indicatorMode == IndicatorMode.MACD) ? IndicatorMode.RSI
-                    : (indicatorMode == IndicatorMode.RSI) ? IndicatorMode.DMI
-                    : IndicatorMode.MACD;
-            updateIndicatorModeButtonText();
-            if (fullPriceList != null && !fullPriceList.isEmpty()) drawCharts(fullPriceList, currentStockId);
-        });
 
         // 日期輸入框：不彈鍵盤，點擊出日曆
         startDateEditText.setFocusable(false);
@@ -545,9 +536,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
     private void setControlsEnabled(boolean enabled) {
         if (intervalSwitchButton != null) intervalSwitchButton.setEnabled(enabled);
-        if (viewModeButton != null) viewModeButton.setEnabled(enabled);
-        if (indicatorModeButton != null) indicatorModeButton.setEnabled(enabled);
-
         if (stockIdEditText != null) stockIdEditText.setEnabled(enabled);
         if (startDateEditText != null) startDateEditText.setEnabled(enabled);
         if (comparisonStockIdEditText != null) comparisonStockIdEditText.setEnabled(enabled);
@@ -1749,26 +1737,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     @Override
     public void onChartFling(MotionEvent me1, MotionEvent me2, float velocityX, float velocityY) {
-     //   if (screenerResults.isEmpty()) return;
-
-     //   float dx = me2.getX() - me1.getX();
-     //   float dy = me2.getY() - me1.getY();
-
-     //   float absX = Math.abs(dx);
-     //   float absY = Math.abs(dy);
-
-     //   final float MIN_PX = 120f; // 你可依手感微調
-
-        // 以位移方向判斷（對齊你的指定：向右滑=右鍵、向左滑=左鍵、向上滑=ESC）
-     //   if (absX > absY && absX > MIN_PX) {
-     //   if (dx > 0) navFiltered(+1);   // 向右滑 => 下一檔（Right）
-     //       else        navFiltered(-1);   // 向左滑 => 上一檔（Left）
-     //       return;
-     //   }
-
-     //   if (absY > absX && absY > MIN_PX) {
-     //       if (dy < 0) onSwipeUpEsc();    // 向上滑 => ESC
-     //   }
     }
 
     private void cancelScreeningService() {
@@ -1820,6 +1788,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     private void initNavGesturesOnKdChart() {
         navGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+
+            @Override
+            public boolean onSingleTapUp(MotionEvent e) {
+                // ✅ 單點：切換 KD/對比/同時顯示
+                cycleKkdViewMode();
+                return true;
+            }
+
             @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
                 if (e1 == null || e2 == null) return false;
@@ -1839,7 +1815,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                     return true;
                 }
 
-                // 向上滑：結束/提示（你目前 onSwipeUpEsc 也包含取消篩選的邏輯）
+                // 向上滑：結束/提示
                 if (absY > absX && absY > MIN_PX && dy < 0) {
                     onSwipeUpEsc();
                     return true;
@@ -1849,11 +1825,19 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         });
 
-        // 讓第二圖區吃掉手勢，不把 touch 交給 chart（避免它自己處理拖拉/高亮）
+        // ✅ 只保留這個 listener（統一處理 fling + tap）
+        k_kdChart.setEnabled(true);
         k_kdChart.setClickable(true);
+        k_kdChart.setTouchEnabled(true);
+        k_kdChart.setDragEnabled(false);
+        k_kdChart.setScaleEnabled(false);
+        k_kdChart.setHighlightPerTapEnabled(false);
+        k_kdChart.setHighlightPerDragEnabled(false);
+
         k_kdChart.setOnTouchListener((v, event) -> {
-            navGestureDetector.onTouchEvent(event);
-            return true; // ✅ consume，避免影響 chart 自己的觸控
+            boolean handled = navGestureDetector.onTouchEvent(event);
+            // onTouchEvent 若沒處理，也把事件吃掉，避免 chart 自己處理
+            return true;
         });
     }
     private boolean applyLanguagePolicyBySystemLocaleAndReturnIfChanged() {
@@ -1887,24 +1871,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return true; // 會觸發重建，這輪不要再做初始化
         }
         return false;
-    }
-
-    private void updateViewModeButtonText() {
-        if (viewModeButton == null) return;
-        int[] res = {
-                R.string.view_mode_all,
-                R.string.view_mode_k,
-                R.string.view_mode_vo,
-                R.string.view_mode_vp
-        };
-        viewModeButton.setText(res[currentViewModeIndex]);
-    }
-
-    private void updateIndicatorModeButtonText() {
-        int resId = (indicatorMode == IndicatorMode.MACD) ? R.string.indicator_macd
-                : (indicatorMode == IndicatorMode.RSI) ? R.string.indicator_rsi
-                : R.string.indicator_dmi;
-        indicatorModeButton.setText(resId);
     }
 
     private void hideKeyboard(View view) {
@@ -2287,6 +2253,49 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         mainChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
         mainChart.setDrawMarkers(true);
+        mainTapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onSingleTapUp(MotionEvent e) {
+                cycleMainViewMode();
+                return true;
+            }
+        });
+
+        // mainChart 點一下切換（這裡吃掉單點；若你很在意 marker，就改成 double tap）
+        mainChart.setOnTouchListener((v, ev) -> mainTapDetector.onTouchEvent(ev));
+
+        // vpView 會蓋住 mainChart，VP/ALL 時點到的是 vpView，所以 vpView 也要切換
+        vpView.setOnTouchListener((v, ev) -> {
+            if (ev.getAction() == MotionEvent.ACTION_UP) {
+                cycleMainViewMode();
+                v.performClick();
+            }
+            return true;
+        });
+
+    }
+    private void cycleMainViewMode() {
+        currentViewModeIndex = (currentViewModeIndex + 1) % VIEW_MODES.length;
+        if (lastDisplayedListForMain != null) {
+            redrawMainOnly(lastDisplayedListForMain);
+        }
+    }
+
+    private void redrawMainOnly(List<StockDayPrice> displayedList) {
+        String mode = VIEW_MODES[currentViewModeIndex];
+
+        // vpView 顯示/隱藏（你原本 drawCharts 裡就有，這裡是點擊切換時也要同步）
+        if (mode.equals("ALL") || mode.equals("VP")) {
+            vpView.setVisibility(View.VISIBLE);
+            vpView.setVolumeProfile(volumeProfileData, minPriceGlobal, bucketSizeGlobal, NUM_PRICE_BUCKETS);
+        } else {
+            vpView.setVisibility(View.GONE);
+            vpView.clear();
+        }
+
+        drawMainChartData(displayedList);
+        updateGapLabelVisibility();
+        mainChart.invalidate();
+        vpView.invalidate();
     }
     private void scaleLegendTextSizeBy(Legend legend, float factor) {
         float density = getResources().getDisplayMetrics().density;
@@ -2317,10 +2326,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 CombinedChart.DrawOrder.LINE
         });
 
-        k_kdChart.setTouchEnabled(false);
-        k_kdChart.setScaleEnabled(false);
-        k_kdChart.setDragEnabled(false);
-
         XAxis xAxis = k_kdChart.getXAxis();
         xAxis.setPosition(XAxis.XAxisPosition.BOTTOM);
         xAxis.setDrawGridLines(true);
@@ -2349,11 +2354,79 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         k_kdChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
     }
+    private void cycleKkdViewMode() {
+        switch (kkdViewMode) {
+            case BOTH:         kkdViewMode = KkdViewMode.KD_ONLY; break;
+            case KD_ONLY:      kkdViewMode = KkdViewMode.COMPARE_ONLY; break;
+            case COMPARE_ONLY: kkdViewMode = KkdViewMode.BOTH; break;
+        }
 
+        // 只調整顯示，不重抓資料
+        applyKkdViewModeToChart();
+
+        k_kdChart.fitScreen();
+        k_kdChart.invalidate();
+    }
+
+    private void applyKkdViewModeToChart() {
+        if (k_kdChart == null) return;
+
+        boolean showKd = (kkdViewMode == KkdViewMode.KD_ONLY || kkdViewMode == KkdViewMode.BOTH);
+        boolean showCompare = (kkdViewMode == KkdViewMode.COMPARE_ONLY || kkdViewMode == KkdViewMode.BOTH);
+
+        // 1) KD 線（LineData）顯示/隱藏
+        com.github.mikephil.charting.data.LineData ld = k_kdChart.getLineData();
+        if (ld != null) {
+            for (com.github.mikephil.charting.interfaces.datasets.ILineDataSet s : ld.getDataSets()) {
+                if (s instanceof com.github.mikephil.charting.data.LineDataSet) {
+                    ((com.github.mikephil.charting.data.LineDataSet) s).setVisible(showKd);
+                }
+            }
+        }
+
+        // 2) 對比 K 線（CandleData）顯示/隱藏
+        com.github.mikephil.charting.data.CandleData cd = k_kdChart.getCandleData();
+        if (cd != null) {
+            for (com.github.mikephil.charting.interfaces.datasets.ICandleDataSet s : cd.getDataSets()) {
+                if (s instanceof com.github.mikephil.charting.data.CandleDataSet) {
+                    ((com.github.mikephil.charting.data.CandleDataSet) s).setVisible(showCompare);
+                }
+            }
+        }
+
+        // 3) 軸顯示（依你目前設定：右軸是 KD 0~100）
+        YAxis left = k_kdChart.getAxisLeft();
+        YAxis right = k_kdChart.getAxisRight();
+
+        if (kkdViewMode == KkdViewMode.KD_ONLY) {
+            // 只看 KD：只留右軸（0~100），左軸關掉
+            left.setEnabled(false);
+            right.setEnabled(true);
+            right.setAxisMinimum(0f);
+            right.setAxisMaximum(100f);
+        } else if (kkdViewMode == KkdViewMode.COMPARE_ONLY) {
+            // 只看對比K線：只留左軸（價格），右軸關掉
+            left.setEnabled(true);
+            right.setEnabled(false);
+
+            // 你的 resetKDJAndComparisonAxisLimits() 會把左軸調成價格範圍（若它依賴資料集可見性，就在這裡呼叫）
+            resetKDJAndComparisonAxisLimits();
+        } else {
+            // 同時顯示：兩軸都開
+            left.setEnabled(true);
+            right.setEnabled(true);
+            right.setAxisMinimum(0f);
+            right.setAxisMaximum(100f);
+
+            resetKDJAndComparisonAxisLimits();
+        }
+
+        k_kdChart.notifyDataSetChanged();
+    }
     private void setupIndicatorChart() {
         indicatorChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
         indicatorChart.getDescription().setEnabled(false);
-        indicatorChart.setNoDataText("MACD 指標區");
+        indicatorChart.setNoDataText("MACD 指標區"); // 可留著
         indicatorChart.setBackgroundColor(Color.BLACK);
 
         Legend legend = indicatorChart.getLegend();
@@ -2362,9 +2435,27 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         legend.setForm(Legend.LegendForm.SQUARE);
         legend.setEnabled(false);
 
-        indicatorChart.setTouchEnabled(false);
+        // ✅ 改這裡：要能接收單點
+        indicatorChart.setTouchEnabled(true);
         indicatorChart.setScaleEnabled(false);
         indicatorChart.setDragEnabled(false);
+        indicatorChart.setHighlightPerTapEnabled(false);
+
+        // ✅ 單點切換模式
+        indicatorChart.setOnChartGestureListener(new com.github.mikephil.charting.listener.OnChartGestureListener() {
+            @Override public void onChartSingleTapped(android.view.MotionEvent me) {
+                cycleIndicatorMode();
+            }
+            @Override public void onChartGestureStart(android.view.MotionEvent me,
+                                                      com.github.mikephil.charting.listener.ChartTouchListener.ChartGesture lastPerformedGesture) {}
+            @Override public void onChartGestureEnd(android.view.MotionEvent me,
+                                                    com.github.mikephil.charting.listener.ChartTouchListener.ChartGesture lastPerformedGesture) {}
+            @Override public void onChartLongPressed(android.view.MotionEvent me) {}
+            @Override public void onChartDoubleTapped(android.view.MotionEvent me) {}
+            @Override public void onChartFling(android.view.MotionEvent me1, android.view.MotionEvent me2, float velocityX, float velocityY) {}
+            @Override public void onChartScale(android.view.MotionEvent me, float scaleX, float scaleY) {}
+            @Override public void onChartTranslate(android.view.MotionEvent me, float dX, float dY) {}
+        });
 
         XAxis xAxis = indicatorChart.getXAxis();
         xAxis.setPosition(XAxis.XAxisPosition.BOTTOM);
@@ -2386,6 +2477,49 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         leftAxis.setPosition(YAxis.YAxisLabelPosition.INSIDE_CHART);
 
         indicatorChart.getAxisRight().setEnabled(false);
+
+        updateIndicatorModeLabel();
+    }
+    private void cycleIndicatorMode() {
+        switch (indicatorMode) {
+            case MACD: indicatorMode = IndicatorMode.RSI; break;
+            case RSI:  indicatorMode = IndicatorMode.DMI; break;
+            case DMI:  indicatorMode = IndicatorMode.MACD; break;
+        }
+        updateIndicatorModeLabel();
+
+        // 只重畫 indicator（不用整張重畫）
+        if (lastDisplayedListForIndicator != null) {
+            redrawIndicatorOnly(lastDisplayedListForIndicator);
+        }
+    }
+
+    private void updateIndicatorModeLabel() {
+        if (indicatorModeLabel == null) return;
+        int resId = (indicatorMode == IndicatorMode.MACD) ? R.string.indicator_mode_macd
+                : (indicatorMode == IndicatorMode.RSI) ? R.string.indicator_mode_rsi
+                : R.string.indicator_mode_dmi;
+        indicatorModeLabel.setText(resId);
+    }
+
+    private void redrawIndicatorOnly(List<StockDayPrice> displayedList) {
+        if (displayedList == null || displayedList.isEmpty()) return;
+
+        if (indicatorMode == IndicatorMode.RSI) {
+            drawRsiIndicatorChartData(displayedList);
+            updateRsiIndicatorAxis();
+        } else if (indicatorMode == IndicatorMode.DMI) {
+            drawDmiIndicatorChartData(displayedList);
+            updateDmiIndicatorAxis(displayedList);
+        } else {
+            CombinedData combinedMacdData = drawIndicatorChartData(displayedList);
+            if (combinedMacdData.getBarData() != null || combinedMacdData.getLineData() != null) {
+                updateMacdIndicatorAxis(displayedList);
+            }
+        }
+
+        indicatorChart.fitScreen();
+        indicatorChart.invalidate();
     }
 
     private void drawCharts(List<StockDayPrice> fullPriceList, String symbol) {
@@ -2397,9 +2531,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return;
         }
 
-
         setKDJinterval(currentInterval);
-        //calculateKDJ(cleanedFull, currentInterval);
+        // calculateKDJ(cleanedFull, currentInterval); // 你已拿掉/不需要
         calculateVolumeProfile(cleanedFull);
 
         List<StockDayPrice> displayedList = getDisplayedList(cleanedFull);
@@ -2409,6 +2542,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return;
         }
 
+        // 記住目前指標圖使用的資料，點擊 indicatorChart 切換模式時會用到
+        lastDisplayedListForIndicator = displayedList;
+        updateIndicatorModeLabel();
 
         coordinateMarker = new CoordinateMarkerView(this, displayedList);
         coordinateMarker.setChartView(mainChart);
@@ -2442,24 +2578,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         rightAxis.setAxisMaximum((float) maxVolume * 4f);
         rightAxis.setAxisMinimum(0f);
 
+        // 主圖
         drawMainChartData(displayedList);
-      //  YAxis r = mainChart.getAxisRight();
-      //  Log.d(TAG, "AxisRight min=" + r.getAxisMinimum() + " max=" + r.getAxisMaximum());
+        lastDisplayedListForMain = displayedList;
 
+        // KD + 對比
         drawKDAndComparisonChartData(displayedList);
+        lastDisplayedListForKkd = displayedList;
 
-        if (indicatorMode == IndicatorMode.RSI) {
-            drawRsiIndicatorChartData(displayedList);
-            updateRsiIndicatorAxis();
-        } else if (indicatorMode == IndicatorMode.DMI) {
-            drawDmiIndicatorChartData(displayedList);
-            updateDmiIndicatorAxis(displayedList);
-        } else {
-            CombinedData combinedMacdData = drawIndicatorChartData(displayedList);
-            if (combinedMacdData.getBarData() != null || combinedMacdData.getLineData() != null) {
-                updateMacdIndicatorAxis(displayedList);
-            }
-        }
+// 畫完資料後，依目前模式決定要顯示 KD/對比/兩者
+        applyKkdViewModeToChart();
+        resetKDJAndComparisonAxisLimits();
+
+        // ✅ 指標圖：依目前 indicatorMode 畫 MACD / RSI / DMI（不再靠按鈕）
+        redrawIndicatorOnly(displayedList);
 
         float chartXMax = displayedList.size() - 0.5f;
         float chartXMin = -0.5f;
@@ -2475,6 +2607,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         mainChart.fitScreen();
         updateGapLabelVisibility();
+
         resetKDJAndComparisonAxisLimits();
 
         k_kdChart.fitScreen();
@@ -2484,8 +2617,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         k_kdChart.invalidate();
         indicatorChart.invalidate();
         vpView.invalidate();
-
-        resetKDJAndComparisonAxisLimits();
     }
     private List<StockDayPrice> getDisplayedList(List<StockDayPrice> fullList) {
         return fullList;
@@ -2603,6 +2734,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         String mode = VIEW_MODES[currentViewModeIndex];
 
+        // 你的 4 種模式：K / Vo / VP / ALL
+        boolean showCandle  = mode.equals("ALL") || mode.equals("K") || mode.equals("VP");
+        boolean showMA      = mode.equals("ALL") || mode.equals("K");
+        boolean showVol     = mode.equals("ALL") || mode.equals("Vo");
+        boolean showScatter = mode.equals("ALL") || mode.equals("K");
+
         CombinedData data = new CombinedData();
         ScatterData scatterData = new ScatterData();
 
@@ -2610,21 +2747,29 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         String cyanColor = "#00FFFF";
         float smallSize = 17.5f;
 
-        if (mode.equals("ALL") || mode.equals("K")) {
+        // Candle (K線)
+        if (showCandle) {
             data.setData(generateCandleData(displayedList));
-            data.setData(generateLineData(displayedList));
         } else {
             data.setData(new CandleData());
+        }
+
+        // MA 線
+        if (showMA) {
+            data.setData(generateLineData(displayedList));
+        } else {
             data.setData(new LineData());
         }
 
-        if (mode.equals("ALL") || mode.equals("Vo")) {
+        // Volume Bar
+        if (showVol) {
             data.setData(generateBarData(displayedList));
         } else {
             data.setData(new BarData());
         }
 
-        if (mode.equals("ALL") || mode.equals("K")) {
+        // Scatter（背離點/標記）：只在 ALL 或 K 顯示
+        if (showScatter) {
             if (displayedList.size() >= 60 && "1d".equals(currentInterval)) {
                 int d60Idx = displayedList.size() - 60;
                 List<Entry> d60Entries = new ArrayList<>();
@@ -2638,7 +2783,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             float yRange = mainChart.getAxisLeft().getAxisMaximum() - mainChart.getAxisLeft().getAxisMinimum();
             float offset = yRange * 0.015f;
 
-            // ✅ 改成共用函式：畫圖與篩選用同一套背離判斷
             MacdDivergenceUtil.Result div = MacdDivergenceUtil.compute(displayedList);
 
             for (int idx : div.difBottom) {
@@ -2665,18 +2809,16 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         mainChart.setData(data);
 
+        // ----- Legend -----
         Legend legend = mainChart.getLegend();
         List<LegendEntry> customEntries = new ArrayList<>();
 
-        // 只在主圖有畫 K/MA 時才顯示（你原本就是這樣）
-        if ((mode.equals("ALL") || mode.equals("K")) && data.getLineData() != null) {
-
-            // 取出「目前真的畫在主圖上的兩條 MA 線」的 dataset（依你現況就是兩條）
+        // MA legend：只有在有畫 MA 時才顯示
+        if (showMA && data.getLineData() != null) {
             List<ILineDataSet> sets = data.getLineData().getDataSets();
             ILineDataSet ma1 = (sets.size() >= 1) ? sets.get(0) : null;
             ILineDataSet ma2 = (sets.size() >= 2) ? sets.get(1) : null;
 
-            // 1) MA數字1
             if (ma1 != null) {
                 customEntries.add(new LegendEntry(
                         ma1.getLabel(),
@@ -2685,7 +2827,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 ));
             }
 
-            // 2) MA數字2
             if (ma2 != null) {
                 customEntries.add(new LegendEntry(
                         ma2.getLabel(),
@@ -2693,8 +2834,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         ma2.getColor()
                 ));
             }
+        }
 
-            // 3) 主要股票代碼|股票名稱|產業別
+        // 主股票 legend：只要有畫 K線就顯示
+        if (showCandle) {
             int stockColor = Color.RED;
             if (data.getCandleData() != null && data.getCandleData().getDataSetCount() > 0) {
                 try {
@@ -2826,11 +2969,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
 
     private void resetKDJAndComparisonAxisLimits() {
+        // 右軸：KD 固定 0~100
         YAxis rightAxis = k_kdChart.getAxisRight();
         rightAxis.setEnabled(true);
         rightAxis.setDrawLabels(false);
         rightAxis.setAxisMinimum(0f);
-        rightAxis.setAxisMaximum(200f);
+        rightAxis.setAxisMaximum(100f);
         rightAxis.removeAllLimitLines();
 
         LimitLine ll80 = new LimitLine(80f, "80");
@@ -2847,26 +2991,28 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         ll20.setTextSize(8f);
         rightAxis.addLimitLine(ll20);
 
+        // 左軸：對比K線價格範圍（用整段 displayedMainList，不用可視區間）
         YAxis leftAxis = k_kdChart.getAxisLeft();
-        if (comparisonPriceList.isEmpty() || k_kdChart.getVisibleXRange() <= 0) {
+
+        if (comparisonPriceList.isEmpty()) {
             leftAxis.setEnabled(false);
             return;
         }
         leftAxis.setEnabled(true);
 
-        float minX = k_kdChart.getLowestVisibleX();
-        float maxX = k_kdChart.getHighestVisibleX();
+        // 用 displayedMainList 的日期去對齊對比資料
+        Map<String, StockDayPrice> compMap = new HashMap<>();
+        for (StockDayPrice p : comparisonPriceList) compMap.put(p.getDate(), p);
+
+        // ⚠️ 你這裡原本用 fullPriceList 再 getDisplayedList(fullPriceList)
+        // 建議改成用「drawKDAndComparisonChartData(displayedList) 當下那份 displayedList」
+        // 最簡做法：你把 displayedMainList 當參數傳進來（見下方）
+        List<StockDayPrice> displayedMainList = getDisplayedList(fullPriceList);
 
         double maxPrice = Double.NEGATIVE_INFINITY;
         double minPrice = Double.POSITIVE_INFINITY;
 
-        Map<String, StockDayPrice> compMap = new HashMap<>();
-        for (StockDayPrice p : comparisonPriceList) compMap.put(p.getDate(), p);
-
-        List<StockDayPrice> displayedMainList = getDisplayedList(fullPriceList);
-
         for (int i = 0; i < displayedMainList.size(); i++) {
-            if (i < minX || i > maxX) continue;
             StockDayPrice cp = compMap.get(displayedMainList.get(i).getDate());
             if (cp == null) continue;
             maxPrice = Math.max(maxPrice, cp.getHigh());
@@ -2941,8 +3087,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 combinedData.setData(new CandleData(set));
                 customEntries.add(new LegendEntry(kLineLabel, Legend.LegendForm.SQUARE, 10f, 0f, null, INCREASING_COLOR));
 
-                resetKDJAndComparisonAxisLimits();
-            } else {
+                } else {
                 k_kdChart.getAxisLeft().setEnabled(false);
             }
         }
@@ -2950,6 +3095,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         legend.setCustom(customEntries);
         k_kdChart.setData(combinedData);
         k_kdChart.notifyDataSetChanged();
+        resetKDJAndComparisonAxisLimits();
+
+// ✅ 重點：切 interval 後避免沿用舊的 zoom/translate
+        k_kdChart.fitScreen();          // reset zoom + translate
+        k_kdChart.moveViewToX(-0.5f);   // 可選：把視窗移到最左（避免停在舊位置）
+
         k_kdChart.invalidate();
     }
 

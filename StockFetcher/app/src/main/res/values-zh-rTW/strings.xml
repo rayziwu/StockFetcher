@@ -98,6 +98,9 @@
     <string name="ticker_scrape_saved">✅ 最新 %1$d 筆股票清單已保存至 股票代碼.csv</string>
 
     <string name="ticker_scrape_failed">❌ 爬取失敗：%1$s</string>
+    <string name="indicator_mode_macd">MACD</string>
+    <string name="indicator_mode_rsi">RSI</string>
+    <string name="indicator_mode_dmi">DMI</string>
 
     <string name="div_tf_hour">時</string>
     <string name="div_tf_day">日</string>
