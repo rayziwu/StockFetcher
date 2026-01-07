@@ -110,6 +110,9 @@
 
     <string name="div_side_bottom">Bottom</string>
     <string name="div_side_top">Top</string>
+    <string name="favorite">Favorite</string>
+    <string name="favorite_add">Add to favorites</string>
+    <string name="favorite_remove">Remove from favorites</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>

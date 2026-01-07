@@ -101,6 +101,9 @@
     <string name="indicator_mode_macd">MACD</string>
     <string name="indicator_mode_rsi">RSI</string>
     <string name="indicator_mode_dmi">DMI</string>
+    <string name="favorite">最愛</string>
+    <string name="favorite_add">加入最愛</string>
+    <string name="favorite_remove">移除最愛</string>
 
     <string name="div_tf_hour">時</string>
     <string name="div_tf_day">日</string>

@@ -38,6 +38,21 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:background="@android:color/transparent" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/btnFavorite"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="top|end"
+                android:layout_margin="8dp"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:text="♡"
+                android:textColor="#FF0000"
+                android:textSize="22sp"
+                android:contentDescription="@string/favorite"/>
         </FrameLayout>
 
         <FrameLayout

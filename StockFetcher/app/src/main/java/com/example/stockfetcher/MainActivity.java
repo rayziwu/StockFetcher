@@ -193,6 +193,29 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void setScreenerEnabled(boolean enabled) {
         screenerButton.setEnabled(enabled);
     }
+    private static final String FAVORITES_FILE = "最愛.csv";
+
+    private androidx.appcompat.widget.AppCompatTextView btnFavorite;
+
+    // key: Ticker（例 1101.TW），value: (ticker,name,industry)
+    private final java.util.Map<String, FavoriteInfo> favoriteMap = new java.util.LinkedHashMap<>();
+
+    private static class FavoriteInfo {
+        final String ticker;
+        final String name;
+        final String industry;
+
+        FavoriteInfo(String ticker, String name, String industry) {
+            this.ticker = ticker;
+            this.name = name;
+            this.industry = industry;
+        }
+    }
+
+    private String getCurrentMainTickerKey() {
+        if (currentStockId == null) return "";
+        return currentStockId.trim().toUpperCase(java.util.Locale.US);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -207,6 +230,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         initUi();
         loadSelectedIndustriesFromPrefs();
         initCharts();
+
+        // ✅ 第一次畫圖前先讀最愛.csv（沒有檔案就略過）
+        loadFavoritesIfExists();
+        setupFavoriteButton();
 
         boolean shouldInitialFetch = (savedInstanceState == null) || pendingInitAfterLocaleChange;
         pendingInitAfterLocaleChange = false;
@@ -283,6 +310,57 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return;
         }
     }
+
+    private void loadFavoritesIfExists() {
+        java.io.File extDir = getExternalFilesDir(null);
+        if (extDir == null) return;
+
+        java.io.File f = new java.io.File(extDir, FAVORITES_FILE);
+        if (!f.exists()) return;
+
+        favoriteMap.clear();
+
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(
+                        new java.io.FileInputStream(f),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
+
+            String header = br.readLine();
+            if (header == null) return;
+            if (header.startsWith("\uFEFF")) header = header.substring(1);
+
+            String[] h = splitCsvLine(header);
+
+            int iTicker = -1, iName = -1, iInd = -1;
+            for (int i = 0; i < h.length; i++) {
+                String col = h[i].trim().toLowerCase(java.util.Locale.US);
+                if (col.equals("ticker")) iTicker = i;
+                else if (col.equals("name")) iName = i;
+                else if (col.equals("industry") || col.equals("category")) iInd = i;
+            }
+
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+
+                String[] cols = splitCsvLine(line);
+
+                String tk = (iTicker >= 0 && iTicker < cols.length) ? cols[iTicker].trim()
+                        : (cols.length > 0 ? cols[0].trim() : "");
+                if (tk.isEmpty() || tk.equalsIgnoreCase("ticker")) continue;
+
+                String ticker = tk.toUpperCase(java.util.Locale.US);
+                String name = (iName >= 0 && iName < cols.length) ? cols[iName].trim() : "";
+                String ind  = (iInd >= 0 && iInd < cols.length) ? cols[iInd].trim() : "";
+
+                favoriteMap.put(ticker, new FavoriteInfo(ticker, name, ind));
+            }
+
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "loadFavoritesIfExists failed: " + e.getMessage(), e);
+        }
+    }
+
     private void loadSelectedIndustriesFromPrefs() {
         try {
             java.util.Set<String> s = getSharedPreferences(PREF_SCREEN, MODE_PRIVATE)
@@ -505,6 +583,119 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         });
     }
 
+    private void setupFavoriteButton() {
+        if (btnFavorite == null) {
+            android.util.Log.e(TAG, "setupFavoriteButton: btnFavorite is null");
+            return;
+        }
+
+        // 保險：確保可點
+        btnFavorite.setClickable(true);
+        btnFavorite.setFocusable(true);
+        btnFavorite.setTextColor(android.graphics.Color.RED);
+
+        // 關鍵：把愛心拉到最上層，避免被 vpView 或其他透明 view 擋住觸控
+        btnFavorite.bringToFront();
+        androidx.core.view.ViewCompat.setElevation(btnFavorite, 100f);
+
+        btnFavorite.setOnClickListener(v -> {
+            String t = getCurrentMainTickerKey();
+            android.util.Log.d(TAG, "♥/♡ clicked, currentStockId=" + currentStockId + ", key=" + t);
+
+            toggleFavoriteForCurrentMain();
+            updateFavoriteButtonState();
+        });
+
+        updateFavoriteButtonState();
+    }
+    private void updateFavoriteButtonState() {
+        if (btnFavorite == null) return;
+
+        String key = getCurrentMainTickerKey();
+        boolean isFav = !key.isEmpty() && favoriteMap.containsKey(key);
+
+        //android.util.Log.d(TAG, "updateFavoriteButtonState key=" + key + " isFav=" + isFav);
+
+        btnFavorite.setText(isFav ? "♥" : "♡");
+        btnFavorite.setTextColor(android.graphics.Color.RED);
+    }
+    private void toggleFavoriteForCurrentMain() {
+        String ticker = getCurrentMainTickerKey();
+        if (ticker.isEmpty()) return;
+
+        if (favoriteMap.containsKey(ticker)) {
+            // 已是最愛：移除
+            favoriteMap.remove(ticker);
+            saveFavoritesToFile();
+            return;
+        }
+
+        // 不是最愛：加入
+        String name = "";
+        String industry = "";
+
+        // 你的 TickerInfo 欄位名稱以你原本為準：new TickerInfo(tku, name, ind)
+        TickerInfo info = tickerMetaMap.get(ticker);
+
+        // 保守相容：如果 currentStockId 是 1101 而 meta 是 1101.TW（或反過來）
+        if (info == null) {
+            String base = ticker.replace(".TW", "").replace(".TWO", "");
+            info = tickerMetaMap.get(base);
+        }
+
+        if (info != null) {
+            name = info.name;
+            industry = info.industry;
+        }
+
+        favoriteMap.put(ticker, new FavoriteInfo(ticker, name, industry));
+        saveFavoritesToFile();
+    }
+    private void saveFavoritesToFile() {
+        java.io.File extDir = getExternalFilesDir(null);
+        if (extDir == null) {
+            android.util.Log.w(TAG, "saveFavoritesToFile: externalFilesDir is null, skip saving");
+            return;
+        }
+
+        java.io.File f = new java.io.File(extDir, FAVORITES_FILE); // 最愛.csv
+        writeFavoritesCsvToFile(f);
+    }
+
+    private void writeFavoritesCsvToFile(java.io.File f) {
+        android.util.Log.d(TAG, "Saving favorites to: " + f.getAbsolutePath()
+                + " count=" + favoriteMap.size());
+
+        try (java.io.BufferedWriter bw = new java.io.BufferedWriter(
+                new java.io.OutputStreamWriter(
+                        new java.io.FileOutputStream(f, false),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
+
+            bw.write("Ticker,Name,Industry\n");
+            for (FavoriteInfo it : favoriteMap.values()) {
+                bw.write(csvEscape(it.ticker));
+                bw.write(",");
+                bw.write(csvEscape(it.name));
+                bw.write(",");
+                bw.write(csvEscape(it.industry));
+                bw.write("\n");
+            }
+            bw.flush();
+
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "writeFavoritesCsvToFile failed: " + f.getAbsolutePath(), e);
+            return;
+        }
+
+        android.util.Log.d(TAG, "Saved OK: exists=" + f.exists() + " size=" + f.length());
+    }
+
+    private static String csvEscape(String s) {
+        if (s == null) return "";
+        boolean needQuote = s.contains(",") || s.contains("\"") || s.contains("\n") || s.contains("\r");
+        String t = s.replace("\"", "\"\"");
+        return needQuote ? "\"" + t + "\"" : t;
+    }
     private void bindViews() {
         intervalSwitchButton = findViewById(R.id.intervalSwitchButton);
         indicatorModeLabel = findViewById(R.id.indicatorModeLabel);
@@ -513,12 +704,15 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         startDateEditText = findViewById(R.id.startDateEditText);
         comparisonStockIdEditText = findViewById(R.id.comparisonStockIdEditText);
         stockIdEditText = findViewById(R.id.stockIdEditText);
+        btnFavorite = findViewById(R.id.btnFavorite);
 
         mainChart = findViewById(R.id.mainChart);
         k_kdChart = findViewById(R.id.k_kdChart);
         indicatorChart = findViewById(R.id.indicatorChart);
         vpView = findViewById(R.id.vpView);
         screenerButton = findViewById(R.id.screenerButton);
+        btnFavorite = findViewById(R.id.btnFavorite);
+        //android.util.Log.d(TAG, "bindViews btnFavorite=" + btnFavorite);
     }
 
     private void initUi() {
@@ -2431,6 +2625,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
 
         drawMainChartData(displayedList);
+        // ✅ 每次主圖畫完後更新愛心 ♥/♡
+        updateFavoriteButtonState();
         updateGapLabelVisibility();
         mainChart.invalidate();
         vpView.invalidate();
@@ -2718,6 +2914,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         // 主圖
         drawMainChartData(displayedList);
+        updateFavoriteButtonState();
         lastDisplayedListForMain = displayedList;
 
         // KD + 對比
