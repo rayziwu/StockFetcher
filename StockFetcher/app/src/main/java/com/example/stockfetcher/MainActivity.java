@@ -207,18 +207,19 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         initUi();
         loadSelectedIndustriesFromPrefs();
         initCharts();
-        preloadTickerMetaIfCsvExists();
 
-        // ✅ 初始抓資料：第一次啟動 或 語言剛切換後那一輪
         boolean shouldInitialFetch = (savedInstanceState == null) || pendingInitAfterLocaleChange;
         pendingInitAfterLocaleChange = false;
 
         if (shouldInitialFetch) {
-            fetchStockDataWithFallback(
+            ensureTickerMetaThen(() -> fetchStockDataWithFallback(
                     currentStockId,
                     currentInterval,
                     getStartTimeLimit(currentInterval, isSwitchingInterval)
-            );
+            ));
+        } else {
+            // 非首次進入就照你原本要不要 preload
+            preloadTickerMetaIfCsvExists();
         }
 
         // Android 13+：未允許通知前不讓使用者篩選
@@ -297,8 +298,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 .putStringSet(PREF_INDUSTRIES, new java.util.HashSet<>(selectedIndustries))
                 .apply();
     }
-    private void preloadTickerMetaIfCsvExists() {
-        if (tickerMetaLoadedOnce) return;
+    private boolean preloadTickerMetaIfCsvExists() {
+        // 已經載入過就直接視為 ready
+        if (tickerMetaLoadedOnce) return true;
 
         java.io.File internal = new java.io.File(getFilesDir(), TICKERS_CACHE_FILE);
 
@@ -307,15 +309,41 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         try {
             java.io.File extDir = getExternalFilesDir(null);
             if (extDir != null) external = new java.io.File(extDir, TICKERS_CACHE_FILE);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
-        java.io.File f = internal.exists() ? internal : (external != null && external.exists() ? external : null);
-        if (f == null) return;
+        java.io.File f = internal.exists()
+                ? internal
+                : (external != null && external.exists() ? external : null);
 
-        loadTickerMetaFromCsv(f);
-        tickerMetaLoadedOnce = true;
+        if (f == null) return false;
+
+        try {
+            loadTickerMetaFromCsv(f);   // 你原本的方法（void）維持不變
+            tickerMetaLoadedOnce = true;
+            return true;
+        } catch (Exception e) {
+            // 不要把 tickerMetaLoadedOnce 設成 true，讓之後還有機會重新載入/重爬
+            android.util.Log.w("MainActivity",
+                    "Failed to preload ticker meta from: " + f.getAbsolutePath(), e);
+            return false;
+        }
     }
+    private void ensureTickerMetaThen(Runnable next) {
+        boolean ready = preloadTickerMetaIfCsvExists(); // 先用本機 CSV 快取秒開
 
+        if (ready) {
+            if (next != null) next.run();
+            return;
+        }
+
+        // 沒有代碼才真的去 scrape，並顯示進度 dialog
+        showTickerScrapeDialogThen(() -> {
+            // scrape 完通常會落地成 CSV/快取；再 preload 一次保證 repo 已載入
+            preloadTickerMetaIfCsvExists();
+            if (next != null) next.run();
+        });
+    }
     private void loadTickerMetaFromCsv(java.io.File file) {
         try (java.io.BufferedReader br = new java.io.BufferedReader(
                 new java.io.InputStreamReader(new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
@@ -1287,11 +1315,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
     }
     // 你原本就有 clampInt；這裡避免你沒有 clampLearned
-    private int clampLearned(int v, int lo, int hi) {
-        if (v < lo) return lo;
-        if (v > hi) return hi;
-        return v;
-    }
     private void prepareIndustryThenStartScreening(ScreenerMode mode) {
         if (isScreening) return;
 
