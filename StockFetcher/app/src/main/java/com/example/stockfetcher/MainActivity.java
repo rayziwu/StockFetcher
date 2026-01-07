@@ -2203,6 +2203,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
     }
 
+    private GestureDetector vpTapDetector;
+
     private void setupMainChart() {
         mainChart.getDescription().setEnabled(false);
         mainChart.setDrawGridBackground(false);
@@ -2252,27 +2254,64 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         rightAxis.setDrawLabels(false);
 
         mainChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
+
+        // 保留單點顯示 marker / 十字線
         mainChart.setDrawMarkers(true);
+        mainChart.setHighlightPerTapEnabled(true);
+
+        // 你要拿 double tap 來切換的話，建議關掉圖表預設的 double tap zoom（避免衝突）
+        mainChart.setDoubleTapToZoomEnabled(false);
+
+        // 改成雙擊切換
         mainTapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onSingleTapUp(MotionEvent e) {
+            @Override public boolean onDown(MotionEvent e) {
+                // GestureDetector 要能吃到後續事件，onDown 必須回 true
+                return true;
+            }
+
+            @Override public boolean onDoubleTap(MotionEvent e) {
                 cycleMainViewMode();
                 return true;
             }
         });
 
-        // mainChart 點一下切換（這裡吃掉單點；若你很在意 marker，就改成 double tap）
-        mainChart.setOnTouchListener((v, ev) -> mainTapDetector.onTouchEvent(ev));
-
-        // vpView 會蓋住 mainChart，VP/ALL 時點到的是 vpView，所以 vpView 也要切換
-        vpView.setOnTouchListener((v, ev) -> {
-            if (ev.getAction() == MotionEvent.ACTION_UP) {
-                cycleMainViewMode();
-                v.performClick();
-            }
-            return true;
+        // 讓 Chart 自己先處理觸控（單點 highlight/marker、拖曳、縮放...），我們只額外偵測 double tap
+        mainChart.setOnTouchListener((v, ev) -> {
+            v.onTouchEvent(ev);                 // 交回給圖表：單點 marker 十字線就會正常
+            mainTapDetector.onTouchEvent(ev);   // 只在 double tap 時切換
+            if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
+            return true; // 我們已經手動把事件交給 mainChart.onTouchEvent 了，所以這裡直接吃掉避免重複
         });
 
+        // vpView 蓋住 mainChart 時：也要支援「雙擊切換」，並且把觸控轉送給 mainChart 以保留 marker 十字線
+        vpTapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+
+            @Override public boolean onDoubleTap(MotionEvent e) {
+                cycleMainViewMode();
+                return true;
+            }
+        });
+
+        vpView.setOnTouchListener((v, ev) -> {
+            vpTapDetector.onTouchEvent(ev);
+
+            // 轉送給 mainChart：讓你在 vpView 上單點也能出現 marker/十字線
+            MotionEvent copy = MotionEvent.obtain(ev);
+
+            // 若 vpView 與 mainChart 完全對齊，這個 offset 會是 0；加上它比較保險
+            float dx = vpView.getLeft() - mainChart.getLeft();
+            float dy = vpView.getTop() - mainChart.getTop();
+            copy.offsetLocation(dx, dy);
+
+            mainChart.onTouchEvent(copy);
+            copy.recycle();
+
+            if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
+            return true;
+        });
     }
+
     private void cycleMainViewMode() {
         currentViewModeIndex = (currentViewModeIndex + 1) % VIEW_MODES.length;
         if (lastDisplayedListForMain != null) {
@@ -2283,7 +2322,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void redrawMainOnly(List<StockDayPrice> displayedList) {
         String mode = VIEW_MODES[currentViewModeIndex];
 
-        // vpView 顯示/隱藏（你原本 drawCharts 裡就有，這裡是點擊切換時也要同步）
         if (mode.equals("ALL") || mode.equals("VP")) {
             vpView.setVisibility(View.VISIBLE);
             vpView.setVolumeProfile(volumeProfileData, minPriceGlobal, bucketSizeGlobal, NUM_PRICE_BUCKETS);
