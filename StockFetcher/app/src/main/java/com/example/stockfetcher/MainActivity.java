@@ -344,9 +344,55 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             if (next != null) next.run();
         });
     }
+    private String tryNormalizeAsTicker(String input) {
+        if (input == null) return null;
+        String s = input.trim().toUpperCase(java.util.Locale.US);
+
+        // 1101.TW / 1101.TWO
+        if (s.matches("^\\d{4,6}\\.(TW|TWO)$")) return s;
+
+        // 1101（維持你原本行為：不強制補 .TW）
+        if (s.matches("^\\d{4,6}$")) return s;
+
+        return null;
+    }
+
+    /**
+     * 允許輸入「代碼或名稱」：
+     * - 像代碼 => 直接回代碼
+     * - 否則當名稱 => 查 tickerNameToTicker
+     * - 查不到 => 回原字串（維持原流程）
+     */
+    private String resolveForMainFetch(String rawInput) {
+        if (rawInput == null) return "";
+
+        String input = rawInput.trim();
+        if (input.isEmpty()) return "";
+
+        // 1) 像代碼：直接走原本流程
+        String asTicker = tryNormalizeAsTicker(input);
+        if (asTicker != null) return asTicker;
+
+        // 2) 像名稱：先確保至少 preload 過本機 CSV（不會跳 dialog）
+        preloadTickerMetaIfCsvExists();
+
+        String mapped = tickerNameToTicker.get(normalizeTickerName(input));
+
+        // 3) 查不到：維持原本流程
+        return (mapped != null && !mapped.isEmpty()) ? mapped : input;
+    }
+    // Name -> Ticker（例如：台泥 -> 1101.TW）
+    private final java.util.Map<String, String> tickerNameToTicker = new java.util.HashMap<>();
+
+    private String normalizeTickerName(String s) {
+        if (s == null) return "";
+        return s.replace('\u3000', ' ').trim().replaceAll("\\s+", " ");
+    }
     private void loadTickerMetaFromCsv(java.io.File file) {
         try (java.io.BufferedReader br = new java.io.BufferedReader(
-                new java.io.InputStreamReader(new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+                new java.io.InputStreamReader(
+                        new java.io.FileInputStream(file),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
 
             String header = br.readLine();
             if (header == null) return;
@@ -356,7 +402,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
             int iTicker = -1, iName = -1, iInd = -1;
             for (int i = 0; i < h.length; i++) {
-                String col = h[i].trim().toLowerCase(Locale.US);
+                String col = h[i].trim().toLowerCase(java.util.Locale.US);
                 if (col.equals("ticker")) iTicker = i;
                 else if (col.equals("name")) iName = i;
                 else if (col.equals("industry") || col.equals("category")) iInd = i;
@@ -373,18 +419,34 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
                 if (tk.isEmpty() || tk.equalsIgnoreCase("ticker")) continue;
 
-                String tku = tk.trim().toUpperCase(Locale.US);
+                String tku = tk.trim().toUpperCase(java.util.Locale.US);
 
                 String name = (iName >= 0 && iName < cols.length) ? cols[iName].trim() : "";
                 String ind  = (iInd >= 0 && iInd < cols.length) ? cols[iInd].trim() : "";
 
-                // 存 full ticker
+                // 你原本的：存 full ticker
                 tickerMetaMap.put(tku, new TickerInfo(tku, name, ind));
 
-                // 兼容：如果是 2330.TW / 2330.TWO，也順便存 2330（避免使用者沒打後綴時查不到）
+                // 新增：建立 Name -> Ticker（給 EditText 輸入名稱用）
+                if (!name.isEmpty()) {
+                    String key = normalizeTickerName(name);
+                    String existing = tickerNameToTicker.get(key);
+
+                    if (existing == null) {
+                        tickerNameToTicker.put(key, tku);
+                    } else {
+                        // 若同名同時存在 .TW / .TWO，偏好 .TW（可依你需求調整）
+                        boolean existingIsTWO = existing.endsWith(".TWO");
+                        boolean newIsTW = tku.endsWith(".TW");
+                        if (existingIsTWO && newIsTW) {
+                            tickerNameToTicker.put(key, tku);
+                        }
+                    }
+                }
+
+                // 你原本的：兼容 base ticker（2330.TW / 2330.TWO 也存 2330）
                 if (tku.matches("^\\d{4}\\.(TW|TWO)$")) {
                     String base = tku.substring(0, 4);
-                    // 若已存在 base key，保留先來的（可依你需求改成偏好 .TW）
                     if (!tickerMetaMap.containsKey(base)) {
                         tickerMetaMap.put(base, new TickerInfo(base, name, ind));
                     }
@@ -392,7 +454,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
 
         } catch (Exception e) {
-            Log.w(TAG, "loadTickerMetaFromCsv failed: " + e.getMessage());
+            android.util.Log.w(TAG, "loadTickerMetaFromCsv failed: " + e.getMessage(), e);
         }
     }
 
@@ -501,11 +563,19 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 return;
             }
 
-            String stockId = stockIdEditText.getText().toString().trim();
-            if (!stockId.isEmpty() && !stockId.equalsIgnoreCase(currentStockId)) {
-                fetchStockDataWithFallback(stockId, currentInterval,
-                        getStartTimeLimit(currentInterval, isSwitchingInterval));
-            } else if (stockId.isEmpty()) {
+            String stockIdInput = stockIdEditText.getText().toString().trim();
+
+            if (!stockIdInput.isEmpty()) {
+                String stockId = resolveForMainFetch(stockIdInput);
+
+                if (!stockId.isEmpty() && !stockId.equalsIgnoreCase(currentStockId)) {
+                    fetchStockDataWithFallback(
+                            stockId,
+                            currentInterval,
+                            getStartTimeLimit(currentInterval, isSwitchingInterval)
+                    );
+                }
+            } else {
                 stockIdEditText.setText(currentStockId);
             }
             hideKeyboard(v);
@@ -514,10 +584,17 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         stockIdEditText.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId != EditorInfo.IME_ACTION_DONE) return false;
 
-            String stockId = v.getText().toString().trim();
-            if (!stockId.isEmpty() && !stockId.equalsIgnoreCase(currentStockId)) {
-                fetchStockDataWithFallback(stockId, currentInterval,
-                        getStartTimeLimit(currentInterval, isSwitchingInterval));
+            String stockIdInput = v.getText().toString().trim();
+            if (!stockIdInput.isEmpty()) {
+                String stockId = resolveForMainFetch(stockIdInput);
+
+                if (!stockId.isEmpty() && !stockId.equalsIgnoreCase(currentStockId)) {
+                    fetchStockDataWithFallback(
+                            stockId,
+                            currentInterval,
+                            getStartTimeLimit(currentInterval, isSwitchingInterval)
+                    );
+                }
             }
 
             suppressNextStockIdFocusFetch = true;
@@ -3361,8 +3438,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
 
     private void executeCustomDataFetch() {
-        String symbol = stockIdEditText.getText().toString().trim();
-        if (symbol.isEmpty()) symbol = currentStockId;
+        String input = stockIdEditText.getText().toString().trim();
+        if (input.isEmpty()) input = currentStockId;
+
+        String symbol = resolveForMainFetch(input);
 
         long finalStartTime;
         String dateStr = startDateEditText.getText().toString().trim();
