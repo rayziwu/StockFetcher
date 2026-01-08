@@ -114,6 +114,22 @@
     <string name="favorite_add">Add to favorites</string>
     <string name="favorite_remove">Remove from favorites</string>
 
+    <string name="csv_action_copy">Copy</string>
+    <string name="csv_action_delete">Delete</string>
+
+    <string name="dialog_csv_copy_title">Copy CSV</string>
+    <string name="dialog_csv_copy_msg">Copy from: %1$s\nEnter new file name:</string>
+    <string name="dialog_csv_delete_title">Delete CSV</string>
+    <string name="dialog_csv_delete_msg">Delete this file?\n%1$s</string>
+
+    <string name="error_csv_invalid_filename">Invalid file name.</string>
+    <string name="error_csv_name_exists">File already exists: %1$s</string>
+    <string name="error_csv_copy_failed">Copy failed.</string>
+    <string name="error_csv_delete_failed">Delete failed: %1$s</string>
+
+    <string name="toast_csv_copied">Copied: %1$s</string>
+    <string name="toast_csv_deleted">Deleted: %1$s</string>
+
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>
         <item>@string/div_tf_day</item>

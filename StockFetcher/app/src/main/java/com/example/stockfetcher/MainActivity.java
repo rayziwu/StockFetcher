@@ -932,63 +932,292 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return;
         }
 
-        java.io.File[] files = dir.listFiles((d, name) -> name != null && name.toLowerCase(Locale.US).endsWith(".csv"));
+        java.io.File[] files = dir.listFiles((d, name) ->
+                name != null && name.toLowerCase(java.util.Locale.US).endsWith(".csv"));
+
         if (files == null || files.length == 0) {
             Toast.makeText(this, getString(R.string.error_csv_not_found, dir.getAbsolutePath()), Toast.LENGTH_LONG).show();
             return;
         }
 
         java.util.Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
-        CharSequence[] items = new CharSequence[files.length];
-        for (int i = 0; i < files.length; i++) items[i] = files[i].getName();
+
+        // 用 ListView 才能做長按
+        android.widget.ListView lv = new android.widget.ListView(this);
+        lv.setDividerHeight(1);
+
+        java.util.ArrayList<java.io.File> fileList = new java.util.ArrayList<>();
+        for (java.io.File f : files) fileList.add(f);
+
+        android.widget.ArrayAdapter<java.io.File> adapter = new android.widget.ArrayAdapter<java.io.File>(
+                this, android.R.layout.simple_list_item_1, fileList) {
+            @Override public android.view.View getView(int position, android.view.View convertView, android.view.ViewGroup parent) {
+                android.view.View v = super.getView(position, convertView, parent);
+                android.widget.TextView tv = (android.widget.TextView) v.findViewById(android.R.id.text1);
+                java.io.File f = getItem(position);
+                tv.setText(f != null ? f.getName() : "");
+                return v;
+            }
+        };
+
+        lv.setAdapter(adapter);
+
+        final androidx.appcompat.app.AlertDialog pickerDlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.screener_pick_csv_title)
+                .setView(lv)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+
+        // ✅ 點擊：維持原本「讀取檔案及後續功能」
+        lv.setOnItemClickListener((parent, view, which, id) -> {
+            java.io.File f = fileList.get(which);
+
+            List<String> tickers = readFirstColumnTickersFromCsv(f);
+            if (tickers.isEmpty()) {
+                Toast.makeText(this, getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            // 轉成 screenerResults（假設 ScreenerResult 有 public field: ticker）
+            screenerResults.clear();
+            for (String t : tickers) {
+                String tk = (t == null) ? "" : t.trim().toUpperCase(java.util.Locale.US);
+                if (tk.isEmpty()) continue;
+
+                ScreenerResult r = new ScreenerResult(
+                        tk,            // ticker
+                        "",            // name
+                        "",            // industry
+                        Double.NaN,    // avgClose60 (unknown)
+                        Double.NaN,    // latestClose (unknown)
+                        null,          // lastK
+                        null,          // lastD
+                        null,          // runDays
+                        null,          // ma60
+                        null,          // ma60DiffPct
+                        null           // crossDate
+                );
+                screenerResults.add(r);
+            }
+
+            screenerIndex = 0;
+            screenerSessionClosed = true;      // CSV list 模式不是「篩選 session」
+            allowSaveOnSwipeUp = false;
+
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.dialog_csv_loaded_title)
+                    .setMessage(getString(R.string.dialog_csv_loaded_msg, f.getName(), screenerResults.size()))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+
+            pickerDlg.dismiss();
+            showFilteredAt(0, true);
+        });
+
+        // ✅ 長按：跳出「複製 / 刪除」選單
+        lv.setOnItemLongClickListener((parent, view, which, id) -> {
+            java.io.File f = fileList.get(which);
+            showCsvLongPressMenu(pickerDlg, f);
+            return true; // 吃掉 long press，避免誤觸 click
+        });
+
+        pickerDlg.show();
+    }
+    private void showCsvLongPressMenu(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File targetFile) {
+        if (targetFile == null) return;
+
+        CharSequence[] actions = new CharSequence[] {
+                getString(R.string.csv_action_copy),
+                getString(R.string.csv_action_delete)
+        };
 
         new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(R.string.screener_pick_csv_title)
-                .setItems(items, (dlg, which) -> {
-                    java.io.File f = files[which];
-                    List<String> tickers = readFirstColumnTickersFromCsv(f);
-                    if (tickers.isEmpty()) {
-                        Toast.makeText(this, getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG).show();
+                .setTitle(targetFile.getName())
+                .setItems(actions, (d, which) -> {
+                    if (which == 0) {
+                        showCopyCsvDialog(pickerDlg, targetFile);
+                    } else {
+                        showDeleteCsvConfirmDialog(pickerDlg, targetFile);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+    private void showCopyCsvDialog(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File src) {
+        java.io.File dir = src.getParentFile();
+        if (dir == null) {
+            Toast.makeText(this, getString(R.string.error_csv_copy_failed), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        String suggested = suggestCopyFileName(dir, src.getName());
+
+        final android.widget.EditText et = new android.widget.EditText(this);
+        et.setSingleLine(true);
+        et.setText(suggested);
+        et.setSelection(et.getText().length());
+
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_csv_copy_title)
+                .setMessage(getString(R.string.dialog_csv_copy_msg, src.getName()))
+                .setView(et)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, null) // show 後接管
+                .create();
+
+        dlg.show();
+
+        android.widget.Button ok = dlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE);
+        ok.setOnClickListener(v -> {
+            String input = (et.getText() == null) ? "" : et.getText().toString().trim();
+            String fileName = sanitizeCsvFileName(input);
+
+            if (fileName == null) {
+                Toast.makeText(this, getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG).show();
+                return; // 不 dismiss
+            }
+
+            java.io.File dst = new java.io.File(dir, fileName);
+            if (dst.exists()) {
+                Toast.makeText(this, getString(R.string.error_csv_name_exists, dst.getName()), Toast.LENGTH_LONG).show();
+                return; // 不 dismiss
+            }
+
+            boolean okCopy = copyFile(src, dst);
+            if (!okCopy) {
+                Toast.makeText(this, getString(R.string.error_csv_copy_failed), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            Toast.makeText(this, getString(R.string.toast_csv_copied, dst.getName()), Toast.LENGTH_SHORT).show();
+
+            dlg.dismiss();
+            if (pickerDlg != null) pickerDlg.dismiss();
+
+            // 方案B：關掉後重新開
+            openCsvListPicker();
+        });
+    }
+
+    private String suggestCopyFileName(java.io.File dir, String originalName) {
+        String base = (originalName == null) ? "list" : originalName.trim();
+
+        // 去掉 .csv
+        if (base.toLowerCase(java.util.Locale.US).endsWith(".csv")) {
+            base = base.substring(0, base.length() - 4);
+        }
+        if (base.isEmpty()) base = "list";
+
+        // 抓尾端數字：prefix + number
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^(.*?)(\\d+)$")
+                .matcher(base);
+
+        String prefix;
+        long startNum;
+        int padWidth; // 保留原本數字寬度（例如 009 -> 010）
+
+        if (m.find()) {
+            prefix = m.group(1);
+            String numStr = m.group(2);
+            padWidth = numStr.length();
+
+            long n;
+            try {
+                n = Long.parseLong(numStr);
+            } catch (Exception e) {
+                // 數字太大或解析失敗：退回一般策略
+                prefix = base;
+                padWidth = 0;
+                n = 0;
+            }
+            startNum = n + 1; // ✅ 重點：尾端數字 +1
+        } else {
+            prefix = base;
+            startNum = 1;     // ✅ 沒數字才從 1 開始
+            padWidth = 0;
+        }
+
+        // 找到不撞名的檔名
+        for (long n = startNum; n <= startNum + 9999; n++) {
+            String numPart = (padWidth > 0)
+                    ? String.format(java.util.Locale.US, "%0" + padWidth + "d", n)
+                    : String.valueOf(n);
+
+            String candidate = prefix + numPart + ".csv";
+            if (!new java.io.File(dir, candidate).exists()) return candidate;
+        }
+
+        // 極端情況 fallback
+        return prefix + System.currentTimeMillis() + ".csv";
+    }
+
+    private String sanitizeCsvFileName(String input) {
+        if (input == null) return null;
+        String s = input.trim();
+        if (s.isEmpty()) return null;
+
+        // 不允許路徑穿越或分隔符
+        if (s.contains("/") || s.contains("\\") || s.contains("\u0000")) return null;
+
+        // 確保副檔名 .csv
+        if (!s.toLowerCase(java.util.Locale.US).endsWith(".csv")) {
+            s = s + ".csv";
+        }
+
+        // 避免只剩 .csv
+        if (s.equalsIgnoreCase(".csv")) return null;
+
+        return s;
+    }
+
+    private boolean copyFile(java.io.File src, java.io.File dst) {
+        java.io.InputStream in = null;
+        java.io.OutputStream out = null;
+        try {
+            in = new java.io.FileInputStream(src);
+            out = new java.io.FileOutputStream(dst, false);
+
+            byte[] buf = new byte[8192];
+            int r;
+            while ((r = in.read(buf)) != -1) {
+                out.write(buf, 0, r);
+            }
+            out.flush();
+            return true;
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "copyFile failed: " + e.getMessage(), e);
+            return false;
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) {}
+            try { if (out != null) out.close(); } catch (Exception ignored) {}
+        }
+    }
+    private void showDeleteCsvConfirmDialog(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File target) {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_csv_delete_title)
+                .setMessage(getString(R.string.dialog_csv_delete_msg, target.getName()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    boolean ok = false;
+                    try {
+                        ok = target.delete();
+                    } catch (Exception e) {
+                        android.util.Log.e(TAG, "delete failed: " + e.getMessage(), e);
+                    }
+
+                    if (!ok) {
+                        Toast.makeText(this, getString(R.string.error_csv_delete_failed, target.getName()), Toast.LENGTH_LONG).show();
                         return;
                     }
 
-                    // 轉成 screenerResults（假設 ScreenerResult 有 public field: ticker）
-                    screenerResults.clear();
-                    for (String t : tickers) {
-                        String tk = (t == null) ? "" : t.trim().toUpperCase(Locale.US);
-                        if (tk.isEmpty()) continue;
+                    Toast.makeText(this, getString(R.string.toast_csv_deleted, target.getName()), Toast.LENGTH_SHORT).show();
 
-                        // CSV list mode：只有 ticker，其它欄位先填空/未知
-                        ScreenerResult r = new ScreenerResult(
-                                tk,            // ticker
-                                "",            // name
-                                "",            // industry
-                                Double.NaN,    // avgClose60 (unknown)
-                                Double.NaN,    // latestClose (unknown)
-                                null,          // lastK
-                                null,          // lastD
-                                null,          // runDays
-                                null,          // ma60
-                                null,          // ma60DiffPct
-                                null           // crossDate
-                        );
-                        screenerResults.add(r);
-                    }
-                    screenerIndex = 0;
-                    screenerSessionClosed = true;      // CSV list 模式不是「篩選 session」
-                    allowSaveOnSwipeUp = false;
-
-                    new androidx.appcompat.app.AlertDialog.Builder(this)
-                            .setTitle(R.string.dialog_csv_loaded_title)
-                            .setMessage(getString(R.string.dialog_csv_loaded_msg, f.getName(), screenerResults.size()))
-                            .setPositiveButton(android.R.string.ok, null)
-                            .show();
-
-                    showFilteredAt(0, true);
+                    if (pickerDlg != null) pickerDlg.dismiss();
+                    openCsvListPicker(); // 方案B：重新開
                 })
                 .show();
     }
-
     private List<String> readFirstColumnTickersFromCsv(java.io.File file) {
         List<String> out = new ArrayList<>();
         java.util.HashSet<String> seen = new java.util.HashSet<>();
@@ -3620,29 +3849,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         set.setDrawCircles(false);
         set.setAxisDependency(YAxis.AxisDependency.LEFT);
         lineData.addDataSet(set);
-    }
-
-    private BarData generateBarData(List<StockDayPrice> displayedList) {
-        List<BarEntry> entries = new ArrayList<>();
-        List<Integer> colors = new ArrayList<>();
-
-        for (int i = 0; i < displayedList.size(); i++) {
-            StockDayPrice p = displayedList.get(i);
-            entries.add(new BarEntry(i, (float) p.getVolume()));
-
-            if (p.getClose() > p.getOpen()) colors.add(Color.RED);
-            else if (p.getClose() < p.getOpen()) colors.add(Color.GREEN);
-            else colors.add(Color.WHITE);
-        }
-
-        BarDataSet set = new BarDataSet(entries, "Volume");
-        set.setDrawValues(false);
-        set.setColors(colors);
-        set.setAxisDependency(YAxis.AxisDependency.RIGHT);
-
-        BarData barData = new BarData(set);
-        barData.setBarWidth(0.8f);
-        return barData;
     }
 
     private void calculateVolumeProfile(List<StockDayPrice> prices) {

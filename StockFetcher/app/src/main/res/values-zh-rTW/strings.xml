@@ -112,6 +112,21 @@
 
     <string name="div_side_bottom">底</string>
     <string name="div_side_top">頂</string>
+    <string name="csv_action_copy">複製</string>
+    <string name="csv_action_delete">刪除</string>
+
+    <string name="dialog_csv_copy_title">複製 CSV</string>
+    <string name="dialog_csv_copy_msg">來源檔案：%1$s\n請輸入新檔名：</string>
+    <string name="dialog_csv_delete_title">刪除 CSV</string>
+    <string name="dialog_csv_delete_msg">確定要刪除這個檔案？\n%1$s</string>
+
+    <string name="error_csv_invalid_filename">檔名不合法。</string>
+    <string name="error_csv_name_exists">檔案已存在：%1$s</string>
+    <string name="error_csv_copy_failed">複製失敗。</string>
+    <string name="error_csv_delete_failed">刪除失敗：%1$s</string>
+
+    <string name="toast_csv_copied">已複製：%1$s</string>
+    <string name="toast_csv_deleted">已刪除：%1$s</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>
