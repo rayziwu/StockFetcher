@@ -51,6 +51,7 @@ import com.github.mikephil.charting.data.ScatterDataSet;
 import com.github.mikephil.charting.formatter.ValueFormatter;
 import com.github.mikephil.charting.highlight.Highlight;
 import com.github.mikephil.charting.interfaces.datasets.IBarDataSet;
+import com.github.mikephil.charting.interfaces.datasets.ICandleDataSet;
 import com.github.mikephil.charting.interfaces.datasets.ILineDataSet;
 import com.github.mikephil.charting.interfaces.datasets.IScatterDataSet;
 import com.github.mikephil.charting.listener.ChartTouchListener;
@@ -127,8 +128,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private boolean suppressNextStockIdFocusFetch = false;
 
     private String currentStockId = "2330.TW";
-    private final String[] VIEW_MODES = {"K", "Vo", "VP", "ALL"};
-    private int currentViewModeIndex = 3; // 預設 ALL
+    private final String[] VIEW_MODES = {"K", "VP", "ALL"};
+    private int currentViewModeIndex = 2; // 預設 ALL
     private List<StockDayPrice> lastDisplayedListForMain = null;
     private GestureDetector mainTapDetector;
 
@@ -152,9 +153,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     private TextView indicatorModeLabel;
     private List<StockDayPrice> lastDisplayedListForIndicator = null;
-    private enum KkdViewMode { KD_ONLY, COMPARE_ONLY, BOTH }
-    private KkdViewMode kkdViewMode = KkdViewMode.BOTH;
+    enum KkdViewMode { KD, VOL, COMP }
+    private KkdViewMode kkdViewMode = KkdViewMode.KD;
 
+    // k_kdChart 切換需要用到的「目前顯示資料」
     @androidx.annotation.Nullable
     private List<StockDayPrice> lastDisplayedListForKkd;
 
@@ -712,7 +714,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         vpView = findViewById(R.id.vpView);
         screenerButton = findViewById(R.id.screenerButton);
         btnFavorite = findViewById(R.id.btnFavorite);
-        //android.util.Log.d(TAG, "bindViews btnFavorite=" + btnFavorite);
+        if (comparisonStockIdEditText != null) comparisonStockIdEditText.setVisibility(View.GONE);
     }
 
     private void initUi() {
@@ -2520,7 +2522,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         scaleLegendTextSizeBy(legend, 1.4f);
 
         mainChart.setDrawOrder(new CombinedChart.DrawOrder[]{
-                CombinedChart.DrawOrder.BAR,
                 CombinedChart.DrawOrder.CANDLE,
                 CombinedChart.DrawOrder.LINE,
                 CombinedChart.DrawOrder.SCATTER
@@ -2541,11 +2542,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         leftAxis.setPosition(YAxis.YAxisLabelPosition.INSIDE_CHART);
 
         YAxis rightAxis = mainChart.getAxisRight();
-        rightAxis.setEnabled(true);
-        rightAxis.setDrawGridLines(false);
-        rightAxis.setAxisMinimum(0f);
-        rightAxis.setTextColor(Color.GRAY);
-        rightAxis.setDrawLabels(false);
+        rightAxis.setEnabled(false);
 
         mainChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
 
@@ -2636,9 +2633,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         float curDp = legend.getTextSize() / density;   // px -> dp
         legend.setTextSize(curDp * factor);             // setTextSize 需要 dp
     }
+    private GestureDetector kkdTapDetector;
+
     private void setupk_kdChart() {
         k_kdChart.getDescription().setEnabled(false);
-        k_kdChart.setNoDataText("KD 指標區 / 比較 K 線圖");
+        k_kdChart.setNoDataText("KD / 成交量(張) / 對比 K 線圖");
         k_kdChart.setBackgroundColor(Color.BLACK);
 
         Legend legend = k_kdChart.getLegend();
@@ -2654,8 +2653,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         legend.setYOffset(0f);
         scaleLegendTextSizeBy(legend, 1.4f);
 
-
+        // ✅ 加入 BAR
         k_kdChart.setDrawOrder(new CombinedChart.DrawOrder[]{
+                CombinedChart.DrawOrder.BAR,
                 CombinedChart.DrawOrder.CANDLE,
                 CombinedChart.DrawOrder.LINE
         });
@@ -2672,27 +2672,41 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         leftAxis.setDrawLabels(true);
         leftAxis.setDrawAxisLine(true);
         leftAxis.setTextColor(Color.WHITE);
-        leftAxis.setAxisMinimum(0f);
         leftAxis.removeAllLimitLines();
         leftAxis.setPosition(YAxis.YAxisLabelPosition.INSIDE_CHART);
+        leftAxis.setEnabled(true);
 
+        // ✅ 右軸永遠關閉
         YAxis rightAxis = k_kdChart.getAxisRight();
-        rightAxis.setEnabled(true);
-        rightAxis.setDrawGridLines(false);
-        rightAxis.setDrawLabels(true);
-        rightAxis.setDrawAxisLine(true);
-        rightAxis.setTextColor(Color.YELLOW);
-        rightAxis.setAxisMinimum(0f);
-        rightAxis.setAxisMaximum(100f);
-        rightAxis.setDrawZeroLine(false);
+        rightAxis.setEnabled(false);
 
         k_kdChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
+
+        // 單點拿來切換，避免 highlight 干擾
+        k_kdChart.setHighlightPerTapEnabled(false);
+        k_kdChart.setDrawMarkers(false);
+
+        kkdTapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+
+            @Override public boolean onSingleTapUp(MotionEvent e) {
+                cycleKkdViewMode();
+                return true;
+            }
+        });
+
+        k_kdChart.setOnTouchListener((v, ev) -> {
+            v.onTouchEvent(ev);             // 保留拖曳/縮放等
+            kkdTapDetector.onTouchEvent(ev);// 單點切換
+            if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
+            return true;
+        });
     }
     private void cycleKkdViewMode() {
         switch (kkdViewMode) {
-            case BOTH:         kkdViewMode = KkdViewMode.KD_ONLY; break;
-            case KD_ONLY:      kkdViewMode = KkdViewMode.COMPARE_ONLY; break;
-            case COMPARE_ONLY: kkdViewMode = KkdViewMode.BOTH; break;
+            case KD:   kkdViewMode = KkdViewMode.VOL;  break;
+            case VOL:  kkdViewMode = KkdViewMode.COMP; break;
+            case COMP: kkdViewMode = KkdViewMode.KD;   break;
         }
 
         // 只調整顯示，不重抓資料
@@ -2705,57 +2719,191 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void applyKkdViewModeToChart() {
         if (k_kdChart == null) return;
 
-        boolean showKd = (kkdViewMode == KkdViewMode.KD_ONLY || kkdViewMode == KkdViewMode.BOTH);
-        boolean showCompare = (kkdViewMode == KkdViewMode.COMPARE_ONLY || kkdViewMode == KkdViewMode.BOTH);
+        // 右軸永遠關閉
+        k_kdChart.getAxisRight().setEnabled(false);
 
-        // 1) KD 線（LineData）顯示/隱藏
-        com.github.mikephil.charting.data.LineData ld = k_kdChart.getLineData();
+        boolean showKd   = (kkdViewMode == KkdViewMode.KD);
+        boolean showVol  = (kkdViewMode == KkdViewMode.VOL);
+        boolean showComp = (kkdViewMode == KkdViewMode.COMP);
+
+        // 1) KD Line 顯示/隱藏
+        LineData ld = k_kdChart.getLineData();
         if (ld != null) {
-            for (com.github.mikephil.charting.interfaces.datasets.ILineDataSet s : ld.getDataSets()) {
-                if (s instanceof com.github.mikephil.charting.data.LineDataSet) {
-                    ((com.github.mikephil.charting.data.LineDataSet) s).setVisible(showKd);
-                }
+            for (ILineDataSet s : ld.getDataSets()) {
+                if (s instanceof LineDataSet) ((LineDataSet) s).setVisible(showKd);
             }
         }
 
-        // 2) 對比 K 線（CandleData）顯示/隱藏
-        com.github.mikephil.charting.data.CandleData cd = k_kdChart.getCandleData();
+        // 2) Volume Bar 顯示/隱藏
+        BarData bd = k_kdChart.getBarData();
+        if (bd != null) {
+            for (IBarDataSet s : bd.getDataSets()) {
+                if (s instanceof BarDataSet) ((BarDataSet) s).setVisible(showVol);
+            }
+        }
+
+        // 3) Compare Candle 顯示/隱藏
+        CandleData cd = k_kdChart.getCandleData();
         if (cd != null) {
-            for (com.github.mikephil.charting.interfaces.datasets.ICandleDataSet s : cd.getDataSets()) {
-                if (s instanceof com.github.mikephil.charting.data.CandleDataSet) {
-                    ((com.github.mikephil.charting.data.CandleDataSet) s).setVisible(showCompare);
+            for (ICandleDataSet s : cd.getDataSets()) {
+                if (s instanceof CandleDataSet) ((CandleDataSet) s).setVisible(showComp);
+            }
+        }
+
+        // 4) 左軸依模式設定，且只有 KD 顯示 20/80 線
+        YAxis left = k_kdChart.getAxisLeft();
+        left.setEnabled(true);
+        left.removeAllLimitLines();
+
+        if (showKd) {
+            left.setAxisMinimum(0f);
+            left.setAxisMaximum(100f);
+
+            LimitLine ll80 = new LimitLine(80f, "80");
+            ll80.setLineColor(Color.RED);
+            ll80.setLineWidth(0.8f);
+            ll80.setTextColor(Color.RED);
+            ll80.setTextSize(8f);
+
+            LimitLine ll20 = new LimitLine(20f, "20");
+            ll20.setLineColor(Color.GREEN);
+            ll20.setLineWidth(0.8f);
+            ll20.setTextColor(Color.GREEN);
+            ll20.setTextSize(8f);
+
+            left.addLimitLine(ll80);
+            left.addLimitLine(ll20);
+
+        } else if (showVol) {
+            // 用 displayed list 算 max lots
+            float maxLots = 0f;
+            if (lastDisplayedListForKkd != null) {
+                for (StockDayPrice p : lastDisplayedListForKkd) {
+                    float lots = (float) (p.getVolume() / VOLUME_DIVISOR);
+                    if (lots > maxLots) maxLots = lots;
+                }
+            }
+            left.setAxisMinimum(0f);
+            left.setAxisMaximum(Math.max(10f, maxLots * 1.2f));
+
+        } else { // showComp
+            // 用 candle entries 算 min/max（避免再對齊一次）
+            float min = Float.MAX_VALUE, max = -Float.MAX_VALUE;
+            boolean ok = false;
+
+            CandleData candleData = k_kdChart.getCandleData();
+            if (candleData != null && candleData.getDataSetCount() > 0) {
+                ICandleDataSet ds = candleData.getDataSetByIndex(0);
+                if (ds != null && ds.getEntryCount() > 0) {
+                    for (int i = 0; i < ds.getEntryCount(); i++) {
+                        CandleEntry e = ds.getEntryForIndex(i);
+                        if (e == null) continue;
+                        min = Math.min(min, e.getLow());
+                        max = Math.max(max, e.getHigh());
+                        ok = true;
+                    }
+                }
+            }
+
+            if (ok) {
+                float pad = (max - min) * 0.05f;
+                if (Float.isNaN(pad) || pad == 0f) pad = 0.1f;
+                left.setAxisMinimum(min - pad);
+                left.setAxisMaximum(max + pad);
+            } else {
+                left.resetAxisMinimum();
+                left.resetAxisMaximum();
+            }
+        }
+
+        updateKkdLegendForMode();   // ✅ 圖例跟著模式切換
+        updateComparisonInputVisibility();
+        k_kdChart.notifyDataSetChanged();
+    }
+    private void updateComparisonInputVisibility() {
+        if (comparisonStockIdEditText == null) return;
+
+        boolean show = (kkdViewMode == KkdViewMode.COMP);
+
+        comparisonStockIdEditText.setVisibility(show ? View.VISIBLE : View.GONE);
+
+        if (show) {
+            // 進入對比K線時，把目前對比代碼顯示在輸入框
+            if (displayedComparisonSymbol != null) {
+                comparisonStockIdEditText.setText(displayedComparisonSymbol);
+                comparisonStockIdEditText.setSelection(comparisonStockIdEditText.getText().length());
+            }
+        } else {
+            // 離開對比K線時，避免輸入法/焦點卡著
+            comparisonStockIdEditText.clearFocus();
+            hideKeyboard(comparisonStockIdEditText);
+        }
+    }
+    private void updateKkdLegendForMode() {
+        if (k_kdChart == null) return;
+
+        Legend legend = k_kdChart.getLegend();
+        List<LegendEntry> entries = new ArrayList<>();
+
+        if (kkdViewMode == KkdViewMode.KD) {
+            LineData ld = k_kdChart.getLineData();
+            if (ld != null) {
+                for (int i = 0; i < ld.getDataSetCount(); i++) {
+                    ILineDataSet ds = ld.getDataSetByIndex(i);
+                    if (ds == null) continue;
+                    if (!ds.isVisible()) continue;
+
+                    LegendEntry e = new LegendEntry();
+                    e.label = ds.getLabel();
+                    e.form = Legend.LegendForm.LINE;
+                    e.formLineWidth = 3f;
+                    e.formSize = 10f;
+                    e.formColor = ds.getColor();
+                    entries.add(e);
+                }
+            }
+
+        } else if (kkdViewMode == KkdViewMode.VOL) {
+            BarData bd = k_kdChart.getBarData();
+            if (bd != null && bd.getDataSetCount() > 0) {
+                IBarDataSet ds = bd.getDataSetByIndex(0);
+                if (ds != null && ds.isVisible()) {
+                    LegendEntry e = new LegendEntry();
+                    e.label = ds.getLabel(); // 你在 generateKkdVolumeBarDataInLots() 設的是「成交量(張)」
+                    e.form = Legend.LegendForm.SQUARE;
+                    e.formSize = 10f;
+
+                    // BarDataSet 用多色時 getColor() 只會回第一個色，這裡用灰色比較穩
+                    e.formColor = Color.GRAY;
+                    entries.add(e);
+                }
+            }
+
+        } else { // KkdViewMode.COMP
+            CandleData cd = k_kdChart.getCandleData();
+            if (cd != null && cd.getDataSetCount() > 0) {
+                ICandleDataSet ds = cd.getDataSetByIndex(0);
+                if (ds != null && ds.isVisible()) {
+                    LegendEntry e = new LegendEntry();
+                    e.label = ds.getLabel(); // 通常是 displayedComparisonSymbol
+                    e.form = Legend.LegendForm.SQUARE;
+                    e.formSize = 10f;
+
+                    // 用 increasingColor 當 legend 色（你 CandleDataSet 有設定）
+                    int color = Color.RED;
+                    try {
+                        if (ds instanceof CandleDataSet) {
+                            color = ((CandleDataSet) ds).getIncreasingColor();
+                        }
+                    } catch (Exception ignored) {}
+                    e.formColor = color;
+
+                    entries.add(e);
                 }
             }
         }
 
-        // 3) 軸顯示（依你目前設定：右軸是 KD 0~100）
-        YAxis left = k_kdChart.getAxisLeft();
-        YAxis right = k_kdChart.getAxisRight();
-
-        if (kkdViewMode == KkdViewMode.KD_ONLY) {
-            // 只看 KD：只留右軸（0~100），左軸關掉
-            left.setEnabled(false);
-            right.setEnabled(true);
-            right.setAxisMinimum(0f);
-            right.setAxisMaximum(100f);
-        } else if (kkdViewMode == KkdViewMode.COMPARE_ONLY) {
-            // 只看對比K線：只留左軸（價格），右軸關掉
-            left.setEnabled(true);
-            right.setEnabled(false);
-
-            // 你的 resetKDJAndComparisonAxisLimits() 會把左軸調成價格範圍（若它依賴資料集可見性，就在這裡呼叫）
-            resetKDJAndComparisonAxisLimits();
-        } else {
-            // 同時顯示：兩軸都開
-            left.setEnabled(true);
-            right.setEnabled(true);
-            right.setAxisMinimum(0f);
-            right.setAxisMaximum(100f);
-
-            resetKDJAndComparisonAxisLimits();
-        }
-
-        k_kdChart.notifyDataSetChanged();
+        legend.setCustom(entries);
     }
     private void setupIndicatorChart() {
         indicatorChart.setViewPortOffsets(CHART_OFFSET_LEFT, CHART_OFFSET_TOP, CHART_OFFSET_RIGHT, CHART_OFFSET_BOTTOM);
@@ -2907,11 +3055,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             vpView.clear();
         }
 
-        double maxVolume = displayedList.stream().mapToDouble(StockDayPrice::getVolume).max().orElse(0);
-        YAxis rightAxis = mainChart.getAxisRight();
-        rightAxis.setAxisMaximum((float) maxVolume * 4f);
-        rightAxis.setAxisMinimum(0f);
-
         // 主圖
         drawMainChartData(displayedList);
         updateFavoriteButtonState();
@@ -2996,7 +3139,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         kSet.setLineWidth(1.5f);
         kSet.setDrawCircles(false);
         kSet.setDrawValues(false);
-        kSet.setAxisDependency(YAxis.AxisDependency.RIGHT);
+        kSet.setAxisDependency(YAxis.AxisDependency.LEFT);
         lineData.addDataSet(kSet);
 
         String dLabel = String.format(Locale.US, "D%d", currentKDNPeriod);
@@ -3005,10 +3148,37 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         dSet.setLineWidth(1.5f);
         dSet.setDrawCircles(false);
         dSet.setDrawValues(false);
-        dSet.setAxisDependency(YAxis.AxisDependency.RIGHT);
+        dSet.setAxisDependency(YAxis.AxisDependency.LEFT);
         lineData.addDataSet(dSet);
 
         return lineData;
+    }
+
+    private static final float VOLUME_DIVISOR = 1000f; // getVolume() 若已是「張」就改成 1f
+
+    private BarData generateKkdVolumeBarDataInLots(List<StockDayPrice> displayedList) {
+        List<BarEntry> entries = new ArrayList<>();
+        List<Integer> colors = new ArrayList<>();
+
+        for (int i = 0; i < displayedList.size(); i++) {
+            StockDayPrice p = displayedList.get(i);
+
+            float lots = (float) (p.getVolume() / VOLUME_DIVISOR); // ✅ 張
+            entries.add(new BarEntry(i, lots));
+
+            if (p.getClose() > p.getOpen()) colors.add(Color.RED);
+            else if (p.getClose() < p.getOpen()) colors.add(Color.GREEN);
+            else colors.add(Color.WHITE);
+        }
+
+        BarDataSet set = new BarDataSet(entries, "成交量(張)");
+        set.setDrawValues(false);
+        set.setColors(colors);
+        set.setAxisDependency(YAxis.AxisDependency.LEFT); // ✅ 左軸
+
+        BarData barData = new BarData(set);
+        barData.setBarWidth(0.8f);
+        return barData;
     }
 
     private CombinedData drawIndicatorChartData(List<StockDayPrice> displayedList) {
@@ -3069,10 +3239,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         String mode = VIEW_MODES[currentViewModeIndex];
 
-        // 你的 4 種模式：K / Vo / VP / ALL
+        // 新的 3 種模式：K / VP / ALL
         boolean showCandle  = mode.equals("ALL") || mode.equals("K") || mode.equals("VP");
         boolean showMA      = mode.equals("ALL") || mode.equals("K");
-        boolean showVol     = mode.equals("ALL") || mode.equals("Vo");
         boolean showScatter = mode.equals("ALL") || mode.equals("K");
 
         CombinedData data = new CombinedData();
@@ -3095,14 +3264,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         } else {
             data.setData(new LineData());
         }
-
-        // Volume Bar
-        if (showVol) {
-            data.setData(generateBarData(displayedList));
-        } else {
-            data.setData(new BarData());
-        }
-
         // Scatter（背離點/標記）：只在 ALL 或 K 顯示
         if (showScatter) {
             if (displayedList.size() >= 60 && "1d".equals(currentInterval)) {
@@ -3304,66 +3465,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
 
     private void resetKDJAndComparisonAxisLimits() {
-        // 右軸：KD 固定 0~100
-        YAxis rightAxis = k_kdChart.getAxisRight();
-        rightAxis.setEnabled(true);
-        rightAxis.setDrawLabels(false);
-        rightAxis.setAxisMinimum(0f);
-        rightAxis.setAxisMaximum(100f);
-        rightAxis.removeAllLimitLines();
-
-        LimitLine ll80 = new LimitLine(80f, "80");
-        ll80.setLineColor(Color.RED);
-        ll80.setLineWidth(0.8f);
-        ll80.setTextColor(Color.RED);
-        ll80.setTextSize(8f);
-        rightAxis.addLimitLine(ll80);
-
-        LimitLine ll20 = new LimitLine(20f, "20");
-        ll20.setLineColor(Color.GREEN);
-        ll20.setLineWidth(0.8f);
-        ll20.setTextColor(Color.GREEN);
-        ll20.setTextSize(8f);
-        rightAxis.addLimitLine(ll20);
-
-        // 左軸：對比K線價格範圍（用整段 displayedMainList，不用可視區間）
-        YAxis leftAxis = k_kdChart.getAxisLeft();
-
-        if (comparisonPriceList.isEmpty()) {
-            leftAxis.setEnabled(false);
-            return;
-        }
-        leftAxis.setEnabled(true);
-
-        // 用 displayedMainList 的日期去對齊對比資料
-        Map<String, StockDayPrice> compMap = new HashMap<>();
-        for (StockDayPrice p : comparisonPriceList) compMap.put(p.getDate(), p);
-
-        // ⚠️ 你這裡原本用 fullPriceList 再 getDisplayedList(fullPriceList)
-        // 建議改成用「drawKDAndComparisonChartData(displayedList) 當下那份 displayedList」
-        // 最簡做法：你把 displayedMainList 當參數傳進來（見下方）
-        List<StockDayPrice> displayedMainList = getDisplayedList(fullPriceList);
-
-        double maxPrice = Double.NEGATIVE_INFINITY;
-        double minPrice = Double.POSITIVE_INFINITY;
-
-        for (int i = 0; i < displayedMainList.size(); i++) {
-            StockDayPrice cp = compMap.get(displayedMainList.get(i).getDate());
-            if (cp == null) continue;
-            maxPrice = Math.max(maxPrice, cp.getHigh());
-            minPrice = Math.min(minPrice, cp.getLow());
-        }
-
-        if (Double.isInfinite(maxPrice) || Double.isInfinite(minPrice) || minPrice <= 0) {
-            leftAxis.setEnabled(false);
-            return;
-        }
-
-        float padding = (float) (maxPrice - minPrice) * 0.05f;
-        if (Float.isNaN(padding) || padding == 0f) padding = 0.1f;
-
-        leftAxis.setAxisMinimum((float) minPrice - padding);
-        leftAxis.setAxisMaximum((float) maxPrice + padding);
+        // 新規格下：它只負責依模式更新左軸/limitLines，右軸永遠關閉
+        applyKkdViewModeToChart();
     }
 
     private void drawKDAndComparisonChartData(List<StockDayPrice> displayedMainList) {
@@ -3371,24 +3474,43 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         Legend legend = k_kdChart.getLegend();
         List<LegendEntry> customEntries = new ArrayList<>();
 
+        // 右軸永遠關閉（保險）
+        k_kdChart.getAxisRight().setEnabled(false);
+
+        // 1) KD Line
         LineData lineData = generateKDLineData(displayedMainList);
         if (lineData.getDataSetCount() > 0) {
+            // 保險：全部走左軸
+            for (int i = 0; i < lineData.getDataSetCount(); i++) {
+                lineData.getDataSetByIndex(i).setAxisDependency(YAxis.AxisDependency.LEFT);
+            }
             combinedData.setData(lineData);
 
-        //    final int DIM_WHITE = Color.rgb(120, 120, 120);
-        //    final int DIM_YELLOW = Color.rgb(100, 100, 0);
             final int SKY_BLUE = Color.rgb(79, 195, 247);
-
             String kLegendText = String.format(Locale.getDefault(), "K%d", currentKDNPeriod);
             String dLegendText = String.format(Locale.getDefault(), "D%d", currentKDNPeriod);
-
             customEntries.add(new LegendEntry(kLegendText, Legend.LegendForm.LINE, 10f, 3f, null, Color.LTGRAY));
             customEntries.add(new LegendEntry(dLegendText, Legend.LegendForm.LINE, 10f, 3f, null, SKY_BLUE));
+        } else {
+            combinedData.setData(new LineData());
         }
 
+        // 2) Volume Bar (lots)
+        BarData barData = generateKkdVolumeBarDataInLots(displayedMainList);
+        if (barData != null) {
+            // 保險：走左軸
+            if (barData.getDataSetCount() > 0) {
+                barData.getDataSetByIndex(0).setAxisDependency(YAxis.AxisDependency.LEFT);
+            }
+            combinedData.setData(barData);
+        } else {
+            combinedData.setData(new BarData());
+        }
+
+        // 3) Compare Candle
         if (comparisonPriceList.isEmpty()) {
-            k_kdChart.setNoDataText("KD 指標區 / 無對比 K 線數據可供繪製。");
-            k_kdChart.getAxisLeft().setEnabled(false);
+            k_kdChart.setNoDataText("KD/成交量/對比 K 線圖：無對比 K 線數據可供繪製。");
+            combinedData.setData(new CandleData());
         } else {
             Map<String, StockDayPrice> compMap = new HashMap<>();
             for (StockDayPrice p : comparisonPriceList) compMap.put(p.getDate(), p);
@@ -3397,12 +3519,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             for (int i = 0; i < displayedMainList.size(); i++) {
                 StockDayPrice cp = compMap.get(displayedMainList.get(i).getDate());
                 if (cp == null) continue;
-                entries.add(new CandleEntry(i, (float) cp.getHigh(), (float) cp.getLow(),
+                entries.add(new CandleEntry(i,
+                        (float) cp.getHigh(), (float) cp.getLow(),
                         (float) cp.getOpen(), (float) cp.getClose()));
             }
 
             if (!entries.isEmpty()) {
                 String kLineLabel = displayedComparisonSymbol;
+
                 CandleDataSet set = new CandleDataSet(entries, kLineLabel);
                 set.setDrawIcons(false);
                 set.setShadowColor(Color.GRAY);
@@ -3421,20 +3545,25 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
                 combinedData.setData(new CandleData(set));
                 customEntries.add(new LegendEntry(kLineLabel, Legend.LegendForm.SQUARE, 10f, 0f, null, INCREASING_COLOR));
-
-                } else {
-                k_kdChart.getAxisLeft().setEnabled(false);
+            } else {
+                combinedData.setData(new CandleData());
             }
         }
 
-        legend.setCustom(customEntries);
+        //legend.setCustom(customEntries);
+
         k_kdChart.setData(combinedData);
         k_kdChart.notifyDataSetChanged();
-        resetKDJAndComparisonAxisLimits();
 
-// ✅ 重點：切 interval 後避免沿用舊的 zoom/translate
-        k_kdChart.fitScreen();          // reset zoom + translate
-        k_kdChart.moveViewToX(-0.5f);   // 可選：把視窗移到最左（避免停在舊位置）
+        // 記住這份 list，切換模式/gesture end 都會用到
+        lastDisplayedListForKkd = displayedMainList;
+
+        // ✅ 依目前模式決定顯示 KD / VOL / COMP + 更新左軸範圍與 20/80
+        applyKkdViewModeToChart();
+
+        // 避免沿用舊 zoom/translate
+        k_kdChart.fitScreen();
+        k_kdChart.moveViewToX(-0.5f);
 
         k_kdChart.invalidate();
     }
