@@ -127,6 +127,7 @@
 
     <string name="toast_csv_copied">已複製：%1$s</string>
     <string name="toast_csv_deleted">已刪除：%1$s</string>
+    <string name="toast_favorites_switched">已切換最愛清單：%1$s</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>

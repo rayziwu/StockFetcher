@@ -196,6 +196,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         screenerButton.setEnabled(enabled);
     }
     private static final String FAVORITES_FILE = "最愛.csv";
+    private java.io.File activeFavoritesFile; // 目前正在使用的最愛清單檔
 
     private androidx.appcompat.widget.AppCompatTextView btnFavorite;
 
@@ -234,6 +235,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         initCharts();
 
         // ✅ 第一次畫圖前先讀最愛.csv（沒有檔案就略過）
+        initActiveFavoritesFileIfNeeded();
         loadFavoritesIfExists();
         setupFavoriteButton();
 
@@ -313,13 +315,22 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
     }
 
+    private void initActiveFavoritesFileIfNeeded() {
+        if (activeFavoritesFile != null) return;
+
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null) return;
+
+        activeFavoritesFile = new java.io.File(dir, FAVORITES_FILE); // FAVORITES_FILE = "最愛.csv"
+    }
+
     private void loadFavoritesIfExists() {
-        java.io.File extDir = getExternalFilesDir(null);
-        if (extDir == null) return;
+        initActiveFavoritesFileIfNeeded();
+        if (activeFavoritesFile == null || !activeFavoritesFile.exists()) return;
 
-        java.io.File f = new java.io.File(extDir, FAVORITES_FILE);
-        if (!f.exists()) return;
-
+        loadFavoritesFromFile(activeFavoritesFile);
+    }
+    private void loadFavoritesFromFile(java.io.File f) {
         favoriteMap.clear();
 
         try (java.io.BufferedReader br = new java.io.BufferedReader(
@@ -327,42 +338,64 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         new java.io.FileInputStream(f),
                         java.nio.charset.StandardCharsets.UTF_8))) {
 
-            String header = br.readLine();
-            if (header == null) return;
-            if (header.startsWith("\uFEFF")) header = header.substring(1);
+            String headerOrFirst = br.readLine();
+            if (headerOrFirst == null) return;
+            if (headerOrFirst.startsWith("\uFEFF")) headerOrFirst = headerOrFirst.substring(1);
 
-            String[] h = splitCsvLine(header);
-
+            String[] h = splitCsvLine(headerOrFirst);
             int iTicker = -1, iName = -1, iInd = -1;
+            boolean hasHeader = false;
+
             for (int i = 0; i < h.length; i++) {
                 String col = h[i].trim().toLowerCase(java.util.Locale.US);
-                if (col.equals("ticker")) iTicker = i;
-                else if (col.equals("name")) iName = i;
-                else if (col.equals("industry") || col.equals("category")) iInd = i;
+                if (col.equals("ticker")) { iTicker = i; hasHeader = true; }
+                else if (col.equals("name")) { iName = i; hasHeader = true; }
+                else if (col.equals("industry") || col.equals("category")) { iInd = i; hasHeader = true; }
+            }
+
+            // 如果第一行不是 header，就把第一行當資料處理
+            if (!hasHeader) {
+                processFavoriteCsvLine(headerOrFirst, 0, -1, -1);
             }
 
             String line;
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty()) continue;
-
-                String[] cols = splitCsvLine(line);
-
-                String tk = (iTicker >= 0 && iTicker < cols.length) ? cols[iTicker].trim()
-                        : (cols.length > 0 ? cols[0].trim() : "");
-                if (tk.isEmpty() || tk.equalsIgnoreCase("ticker")) continue;
-
-                String ticker = tk.toUpperCase(java.util.Locale.US);
-                String name = (iName >= 0 && iName < cols.length) ? cols[iName].trim() : "";
-                String ind  = (iInd >= 0 && iInd < cols.length) ? cols[iInd].trim() : "";
-
-                favoriteMap.put(ticker, new FavoriteInfo(ticker, name, ind));
+                processFavoriteCsvLine(line, iTicker >= 0 ? iTicker : 0, iName, iInd);
             }
 
         } catch (Exception e) {
-            android.util.Log.w(TAG, "loadFavoritesIfExists failed: " + e.getMessage(), e);
+            android.util.Log.w(TAG, "loadFavoritesFromFile failed: " + e.getMessage(), e);
         }
     }
 
+    private void processFavoriteCsvLine(String line, int iTicker, int iName, int iInd) {
+        String[] cols = splitCsvLine(line);
+
+        String tk = (iTicker >= 0 && iTicker < cols.length) ? cols[iTicker].trim()
+                : (cols.length > 0 ? cols[0].trim() : "");
+        if (tk.isEmpty() || tk.equalsIgnoreCase("ticker")) return;
+
+        String ticker = tk.toUpperCase(java.util.Locale.US);
+
+        String name = (iName >= 0 && iName < cols.length) ? cols[iName].trim() : "";
+        String ind  = (iInd >= 0 && iInd < cols.length) ? cols[iInd].trim() : "";
+
+        // 若檔案只有 ticker，嘗試用 tickerMetaMap 補 name/industry
+        if ((name.isEmpty() || ind.isEmpty()) && tickerMetaMap != null) {
+            TickerInfo info = tickerMetaMap.get(ticker);
+            if (info == null) {
+                String base = ticker.replace(".TW", "").replace(".TWO", "");
+                info = tickerMetaMap.get(base);
+            }
+            if (info != null) {
+                if (name.isEmpty()) name = info.name;
+                if (ind.isEmpty())  ind  = info.industry; // 你已確認欄位叫 industry
+            }
+        }
+
+        favoriteMap.put(ticker, new FavoriteInfo(ticker, name, ind));
+    }
     private void loadSelectedIndustriesFromPrefs() {
         try {
             java.util.Set<String> s = getSharedPreferences(PREF_SCREEN, MODE_PRIVATE)
@@ -654,14 +687,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         saveFavoritesToFile();
     }
     private void saveFavoritesToFile() {
-        java.io.File extDir = getExternalFilesDir(null);
-        if (extDir == null) {
-            android.util.Log.w(TAG, "saveFavoritesToFile: externalFilesDir is null, skip saving");
+        initActiveFavoritesFileIfNeeded();
+        if (activeFavoritesFile == null) {
+            android.util.Log.w(TAG, "saveFavoritesToFile: activeFavoritesFile is null");
             return;
         }
 
-        java.io.File f = new java.io.File(extDir, FAVORITES_FILE); // 最愛.csv
-        writeFavoritesCsvToFile(f);
+        writeFavoritesCsvToFile(activeFavoritesFile);
     }
 
     private void writeFavoritesCsvToFile(java.io.File f) {
@@ -972,6 +1004,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         lv.setOnItemClickListener((parent, view, which, id) -> {
             java.io.File f = fileList.get(which);
 
+        // ✅ 如果檔名前兩個字是「最愛」，這份清單就當作目前最愛清單檔
+        if (isFavoritesCsvFileName(f.getName())) {
+            setActiveFavoritesFileAndReload(f);
+        }
+
             List<String> tickers = readFirstColumnTickersFromCsv(f);
             if (tickers.isEmpty()) {
                 Toast.makeText(this, getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG).show();
@@ -1022,6 +1059,23 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         });
 
         pickerDlg.show();
+    }
+
+    private boolean isFavoritesCsvFileName(String fileName) {
+        if (fileName == null) return false;
+        // 前兩個字是「最愛」
+        return fileName.startsWith("最愛");
+    }
+
+    private void setActiveFavoritesFileAndReload(java.io.File f) {
+        activeFavoritesFile = f;
+        loadFavoritesFromFile(f);
+        updateFavoriteButtonState(); // 立刻讓主圖愛心狀態跟著更新
+
+        // 可選：提示使用者目前最愛清單來源已切換
+        Toast.makeText(this,
+                getString(R.string.toast_favorites_switched, f.getName()),
+                Toast.LENGTH_SHORT).show();
     }
     private void showCsvLongPressMenu(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File targetFile) {
         if (targetFile == null) return;

@@ -129,6 +129,7 @@
 
     <string name="toast_csv_copied">Copied: %1$s</string>
     <string name="toast_csv_deleted">Deleted: %1$s</string>
+    <string name="toast_favorites_switched">Switched favorites list: %1$s</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>
