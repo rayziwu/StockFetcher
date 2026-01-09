@@ -2995,7 +2995,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         // 只調整顯示，不重抓資料
         applyKkdViewModeToChart();
 
-        k_kdChart.fitScreen();
+        //k_kdChart.fitScreen();
         k_kdChart.invalidate();
     }
 
@@ -3283,7 +3283,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         }
 
-        indicatorChart.fitScreen();
+        //indicatorChart.fitScreen();
         indicatorChart.invalidate();
     }
 
