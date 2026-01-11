@@ -128,6 +128,12 @@
     <string name="toast_csv_copied">已複製：%1$s</string>
     <string name="toast_csv_deleted">已刪除：%1$s</string>
     <string name="toast_favorites_switched">已切換最愛清單：%1$s</string>
+    <string name="dialog_screener_save_title">儲存 CSV</string>
+    <string name="dialog_screener_save_msg">請輸入檔名：</string>
+    <string name="error_csv_save_failed">儲存失敗。</string>
+    <string name="toast_csv_saved">已儲存：%1$s</string>
+    <string name="toast_favorites_replaced">已用此檔案取代最愛清單：%1$s</string>
+    <string name="label_carousel_prefix">輪播:</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>

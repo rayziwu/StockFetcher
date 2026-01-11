@@ -195,10 +195,18 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void setScreenerEnabled(boolean enabled) {
         screenerButton.setEnabled(enabled);
     }
+    private androidx.appcompat.widget.AppCompatTextView tvTopOutsideMainChart;
+
+    // 目前輪播所使用的檔案（CSV picker 載入、或 screener 匯出後確定的檔）
+    @androidx.annotation.Nullable
+    private java.io.File activeCarouselFile;
     private static final String FAVORITES_FILE = "最愛.csv";
     private java.io.File activeFavoritesFile; // 目前正在使用的最愛清單檔
 
     private androidx.appcompat.widget.AppCompatTextView btnFavorite;
+
+    private androidx.appcompat.widget.AppCompatTextView tvCarouselPos;
+    private boolean carouselActive = false;
 
     // key: Ticker（例 1101.TW），value: (ticker,name,industry)
     private final java.util.Map<String, FavoriteInfo> favoriteMap = new java.util.LinkedHashMap<>();
@@ -238,6 +246,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         initActiveFavoritesFileIfNeeded();
         loadFavoritesIfExists();
         setupFavoriteButton();
+        updateTopOutsideMainChartUi();
 
         boolean shouldInitialFetch = (savedInstanceState == null) || pendingInitAfterLocaleChange;
         pendingInitAfterLocaleChange = false;
@@ -639,6 +648,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
             toggleFavoriteForCurrentMain();
             updateFavoriteButtonState();
+            updateTopOutsideMainChartUi();
         });
 
         updateFavoriteButtonState();
@@ -746,9 +756,60 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         vpView = findViewById(R.id.vpView);
         screenerButton = findViewById(R.id.screenerButton);
         btnFavorite = findViewById(R.id.btnFavorite);
+        tvTopOutsideMainChart = findViewById(R.id.tvTopOutsideMainChart);
         if (comparisonStockIdEditText != null) comparisonStockIdEditText.setVisibility(View.GONE);
     }
 
+    private void updateTopOutsideMainChartUi() {
+        if (tvTopOutsideMainChart == null) return;
+
+        // ===== 永遠顯示：最愛檔名(數量) =====
+        String favName = (activeFavoritesFile != null)
+                ? stripCsvExt(activeFavoritesFile.getName())
+                : stripCsvExt(FAVORITES_FILE); // FAVORITES_FILE = "最愛.csv" 的話會變 "最愛"
+
+        int favCount = (favoriteMap != null) ? favoriteMap.size() : 0;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(favName).append("(").append(favCount).append(")");
+
+        // ===== 只有輪播時才顯示：輪播:檔名 序號/總數 =====
+        if (carouselActive && screenerResults != null && !screenerResults.isEmpty()) {
+            int total = screenerResults.size();
+            int idx1 = Math.max(0, Math.min(screenerIndex, total - 1)) + 1;
+
+            String pos =  "(" + idx1 + "/" + total + ")";
+
+            String carouselName = (activeCarouselFile != null)
+                    ? stripCsvExt(activeCarouselFile.getName())
+                    : "";
+
+            // 在輪播檔名前面加「輪播:」
+            if (!carouselName.isEmpty()) {
+                sb.append(" ")
+                        .append(getString(R.string.label_carousel_prefix))
+                        .append(carouselName)
+                        .append(" ")
+                        .append(pos);} else {
+                // 沒有輪播檔名：至少顯示序號/總數（你也可以選擇不顯示任何輪播資訊）
+                sb.append("  ").append(pos);
+            }
+        }
+
+        tvTopOutsideMainChart.setText(sb.toString());
+        tvTopOutsideMainChart.setVisibility(android.view.View.VISIBLE);
+    }
+   private String stripCsvExt(String name) {
+        if (name == null) return "";
+        String s = name.trim();
+        if (s.toLowerCase(java.util.Locale.US).endsWith(".csv")) {
+            s = s.substring(0, s.length() - 4);
+        }
+        return s;
+    }
+   private void updateCarouselPosUi() {
+       updateTopOutsideMainChartUi();
+   }
     private void initUi() {
         yahooFinanceFetcher = new YahooFinanceFetcher();
         vpView.bindMainChart(mainChart);
@@ -815,8 +876,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             String stockIdInput = v.getText().toString().trim();
             if (!stockIdInput.isEmpty()) {
                 String stockId = resolveForMainFetch(stockIdInput);
-
                 if (!stockId.isEmpty() && !stockId.equalsIgnoreCase(currentStockId)) {
+                    carouselActive = false;
+                    updateCarouselPosUi();
+
                     fetchStockDataWithFallback(
                             stockId,
                             currentInterval,
@@ -1009,19 +1072,19 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             setActiveFavoritesFileAndReload(f);
         }
 
-            List<String> tickers = readFirstColumnTickersFromCsv(f);
-            if (tickers.isEmpty()) {
-                Toast.makeText(this, getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG).show();
-                return;
-            }
+        List<String> tickers = readFirstColumnTickersFromCsv(f);
+        if (tickers.isEmpty()) {
+            Toast.makeText(this, getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG).show();
+            return;
+        }
 
-            // 轉成 screenerResults（假設 ScreenerResult 有 public field: ticker）
-            screenerResults.clear();
-            for (String t : tickers) {
-                String tk = (t == null) ? "" : t.trim().toUpperCase(java.util.Locale.US);
-                if (tk.isEmpty()) continue;
-
-                ScreenerResult r = new ScreenerResult(
+        activeCarouselFile = f;
+        // 轉成 screenerResults（假設 ScreenerResult 有 public field: ticker）
+        screenerResults.clear();
+        for (String t : tickers) {
+            String tk = (t == null) ? "" : t.trim().toUpperCase(java.util.Locale.US);
+            if (tk.isEmpty()) continue;
+            ScreenerResult r = new ScreenerResult(
                         tk,            // ticker
                         "",            // name
                         "",            // industry
@@ -1035,20 +1098,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         null           // crossDate
                 );
                 screenerResults.add(r);
-            }
+        }
 
-            screenerIndex = 0;
-            screenerSessionClosed = true;      // CSV list 模式不是「篩選 session」
-            allowSaveOnSwipeUp = false;
+        screenerIndex = 0;
+        screenerSessionClosed = true;      // CSV list 模式不是「篩選 session」
+        allowSaveOnSwipeUp = false;
 
-            new androidx.appcompat.app.AlertDialog.Builder(this)
+        new androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle(R.string.dialog_csv_loaded_title)
                     .setMessage(getString(R.string.dialog_csv_loaded_msg, f.getName(), screenerResults.size()))
                     .setPositiveButton(android.R.string.ok, null)
                     .show();
 
-            pickerDlg.dismiss();
-            showFilteredAt(0, true);
+        pickerDlg.dismiss();
+        showFilteredAt(0, true);
         });
 
         // ✅ 長按：跳出「複製 / 刪除」選單
@@ -1071,11 +1134,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         activeFavoritesFile = f;
         loadFavoritesFromFile(f);
         updateFavoriteButtonState(); // 立刻讓主圖愛心狀態跟著更新
+        updateTopOutsideMainChartUi();
 
         // 可選：提示使用者目前最愛清單來源已切換
-        Toast.makeText(this,
-                getString(R.string.toast_favorites_switched, f.getName()),
-                Toast.LENGTH_SHORT).show();
+        //Toast.makeText(this,
+        //        getString(R.string.toast_favorites_switched, f.getName()),
+        //        Toast.LENGTH_SHORT).show();
     }
     private void showCsvLongPressMenu(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File targetFile) {
         if (targetFile == null) return;
@@ -1246,6 +1310,15 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             try { if (in != null) in.close(); } catch (Exception ignored) {}
             try { if (out != null) out.close(); } catch (Exception ignored) {}
         }
+    }
+    private boolean moveFile(java.io.File src, java.io.File dst) {
+        try {
+            if (src.renameTo(dst)) return true;
+        } catch (Exception ignored) {}
+
+        if (!copyFile(src, dst)) return false;
+        try { src.delete(); } catch (Exception ignored) {}
+        return true;
     }
     private void showDeleteCsvConfirmDialog(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File target) {
         new androidx.appcompat.app.AlertDialog.Builder(this)
@@ -2028,14 +2101,15 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         int n = screenerResults.size();
         screenerIndex = (idx % n + n) % n;
 
+        // ✅ 進入輪播/輪播中
+        carouselActive = true;
+        updateCarouselPosUi(); // 也可放在最後；放這裡會更即時
+
         String t = screenerResults.get(screenerIndex).ticker;
 
-        // 更新輸入框（避免 focus 觸發額外 fetch）
         suppressNextStockIdFocusFetch = true;
         stockIdEditText.setText(t);
 
-        // 篩選結果顯示時：比照 Python，把日期改成「最近六個月」也可以
-        // 這裡保留你的 date input 設計：你若要完全對齊 Python，可改成 6 個月前的 1 日
         executeFetchForFilteredTicker(t, forceDownload);
     }
     private String getScreenerModeLabel(ScreenerMode mode) {
@@ -2273,6 +2347,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
                         pendingExportCsv = intent.getStringExtra(ScreenerForegroundService.EXTRA_CSV_PATH);
 
+                        java.io.File tmpFile = null;
+                        if (pendingExportCsv != null && !pendingExportCsv.trim().isEmpty()) {
+                            tmpFile = new java.io.File(pendingExportCsv);
+                        }
+
+                        // 先讀進記憶體：即使取消刪檔，也能照樣顯示結果
                         List<ScreenerResult> results = readScreenerResultsFromCsv(pendingExportCsv);
 
                         screenerResults.clear();
@@ -2280,36 +2360,59 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
                         screenerIndex = 0;
                         screenerSessionClosed = false;
-                        allowSaveOnSwipeUp = true;
 
                         if (screenerResults.isEmpty()) {
+                            // 沒結果就不必存檔，順便刪 tmp
+                            if (tmpFile != null) {
+                                try { tmpFile.delete(); } catch (Exception ignored) {}
+                            }
                             Toast.makeText(MainActivity.this,
                                     getString(R.string.toast_screener_none, getScreenerModeLabel(screenerMode)),
                                     Toast.LENGTH_LONG).show();
                             return;
                         }
 
-                        String modeLabel = getScreenerModeLabel(screenerMode);
-                        String paramsLine = getActiveParamsText(screenerMode);
-                        int count = screenerResults.size();
-                        String msg = (screenerMode == ScreenerMode.LT20
-                                || screenerMode == ScreenerMode.GT45
-                                || screenerMode == ScreenerMode.MA60_3PCT
-                                || screenerMode == ScreenerMode.MACD_DIV_RECENT
-                                || screenerMode == ScreenerMode.KD_GC_RECENT)
-                                ? getString(R.string.dialog_screener_done_msg_with_params, "", paramsLine, count)
-                                : getString(R.string.dialog_screener_done_msg_with_params, modeLabel, paramsLine, count);
+                        Runnable continueAfterDone = () -> {
+                            allowSaveOnSwipeUp = (pendingExportCsv != null && !pendingExportCsv.trim().isEmpty());
 
-                        new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
-                                .setTitle(R.string.dialog_screener_done_title)
-                                .setMessage(msg)
-                                .setPositiveButton(android.R.string.ok, null)
-                                .show();
-                        // 對齊篩選用的 interval（你原本就有）
-                        applyIntervalForScreener(screenerMode);
+                            String modeLabel = getScreenerModeLabel(screenerMode);
+                            String paramsLine = getActiveParamsText(screenerMode);
+                            int count = screenerResults.size();
+                            String msg = (screenerMode == ScreenerMode.LT20
+                                    || screenerMode == ScreenerMode.GT45
+                                    || screenerMode == ScreenerMode.MA60_3PCT
+                                    || screenerMode == ScreenerMode.MACD_DIV_RECENT
+                                    || screenerMode == ScreenerMode.KD_GC_RECENT)
+                                    ? getString(R.string.dialog_screener_done_msg_with_params, "", paramsLine, count)
+                                    : getString(R.string.dialog_screener_done_msg_with_params, modeLabel, paramsLine, count);
 
-                        // ✅ 顯示第一檔，之後左右滑就會輪播
-                        showFilteredAt(0, true);
+                            new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                                    .setTitle(R.string.dialog_screener_done_title)
+                                    .setMessage(msg)
+                                    .setPositiveButton(android.R.string.ok, null)
+                                    .show();
+
+                            applyIntervalForScreener(screenerMode);
+                            showFilteredAt(0, true);
+                            carouselActive = true;
+                            updateCarouselPosUi();
+                        };
+
+                        // ✅ 存檔前先問檔名（預填原本自動檔名）
+                        finalizeScreenerExportWithPrompt(
+                                tmpFile,
+                                (tmpFile != null ? tmpFile.getName() : "TW_SCREENER.csv"),
+                                finalFileOrNull -> {
+                                    if (finalFileOrNull == null) {
+                                        // 取消：不存檔
+                                        pendingExportCsv = null;
+                                    } else {
+                                        // OK：存檔成功（可能同名保留或改名搬移後的檔）
+                                        pendingExportCsv = finalFileOrNull.getAbsolutePath();
+                                    }
+                                    continueAfterDone.run();
+                                }
+                        );
                     }
                 }
             };
@@ -2317,7 +2420,103 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     @Override
     public void onChartFling(MotionEvent me1, MotionEvent me2, float velocityX, float velocityY) {
     }
+    private void finalizeScreenerExportWithPrompt(
+            @androidx.annotation.Nullable java.io.File tmpFile,
+            String suggestedName,
+            java.util.function.Consumer<java.io.File> onFinish
+    ) {
+        // 沒 tmp 檔：就當作取消，繼續後續操作
+        if (tmpFile == null || !tmpFile.exists()) {
+            if (onFinish != null) onFinish.accept(null);
+            return;
+        }
 
+        java.io.File dir = tmpFile.getParentFile();
+        if (dir == null || !dir.exists()) {
+            if (onFinish != null) onFinish.accept(null);
+            return;
+        }
+
+        final android.widget.EditText et = new android.widget.EditText(this);
+        et.setSingleLine(true);
+
+        String sug = (suggestedName == null) ? "" : suggestedName.trim();
+        if (sug.isEmpty()) sug = tmpFile.getName();
+        if (!sug.toLowerCase(java.util.Locale.US).endsWith(".csv")) sug += ".csv";
+
+        et.setText(sug);
+        if (et.getText() != null) et.setSelection(et.getText().length());
+
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_screener_save_title)
+                .setMessage(R.string.dialog_screener_save_msg)
+                .setView(et)
+                .setNegativeButton(android.R.string.cancel, (d, w) -> {
+                    // ✅ 取消：刪 tmp，不存檔，但繼續後續操作
+                    try { tmpFile.delete(); } catch (Exception ignored) {}
+                    // ✅ 取消：輪播檔名就沒有（或你想保留舊的也行）
+                    activeCarouselFile = null;
+                    // 不要硬設 carouselActive=true，讓 showFilteredAt 決定
+                    updateTopOutsideMainChartUi();
+                    if (onFinish != null) onFinish.accept(null);
+                })
+                .setPositiveButton(android.R.string.ok, null) // show 後接管
+                .create();
+
+        dlg.show();
+
+        android.widget.Button okBtn = dlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE);
+        okBtn.setOnClickListener(v -> {
+            String input = (et.getText() == null) ? "" : et.getText().toString().trim();
+            String fileName = sanitizeCsvFileName(input);
+            if (fileName == null) {
+                Toast.makeText(this, getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            java.io.File outFile = new java.io.File(dir, fileName);
+
+            // ✅ 允許檔名不改：同一個檔就直接保留，不用搬移
+            boolean sameFile = outFile.getAbsolutePath().equals(tmpFile.getAbsolutePath());
+
+            if (!sameFile && outFile.exists()) {
+                Toast.makeText(this, getString(R.string.error_csv_name_exists, outFile.getName()), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            boolean ok;
+            java.io.File finalFile;
+
+            if (sameFile) {
+                ok = true;
+                finalFile = tmpFile;
+            } else {
+                ok = moveFile(tmpFile, outFile); // rename 失敗就 copy+delete
+                finalFile = outFile;
+            }
+
+            if (!ok) {
+                Toast.makeText(this, getString(R.string.error_csv_save_failed), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            Toast.makeText(this, getString(R.string.toast_csv_saved, finalFile.getName()), Toast.LENGTH_SHORT).show();
+
+            // ✅ 檔名開頭「最愛」：用此檔案內容取代最愛清單，且後續 ♥/♡ 寫入同一檔
+            if (isFavoritesCsvFileName(finalFile.getName())) {
+                setActiveFavoritesFileAndReload(finalFile); // 這個方法必須會 activeFavoritesFile = finalFile
+                Toast.makeText(this,
+                        getString(R.string.toast_favorites_replaced, finalFile.getName()),
+                        Toast.LENGTH_SHORT).show();
+            }
+
+            activeCarouselFile = finalFile;
+            updateTopOutsideMainChartUi();
+
+            dlg.dismiss();
+            if (onFinish != null) onFinish.accept(finalFile);
+        });
+    }
     private void cancelScreeningService() {
         android.content.Intent it = new android.content.Intent(this, ScreenerForegroundService.class);
         it.setAction(ScreenerForegroundService.ACTION_CANCEL);

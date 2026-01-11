@@ -333,12 +333,14 @@ public class ScreenerForegroundService extends Service {
             switch (mode) {
                 case LT20: tag = "LT20"; break;
                 case GT45: tag = "GT45"; break;
-                case MA60_3PCT: tag = "MA60_3PCT_40D"; break;
-                case MACD_DIV_RECENT: tag = "MACD_DIV_RECENT"; break;
-                case KD_GC_RECENT: tag = "KD_GC_RECENT"; break;   // ✅ 新增
+                case MA60_3PCT: tag = "MA60_3%"; break;
+                case MACD_DIV_RECENT: tag = "MACD_DIV"; break;
+                case KD_GC_RECENT: tag = "KD_GC"; break;   // ✅ 新增
                 default: tag = "MODE"; break;
+
+
             }
-            File out = new File(dir, "TW_SCREENER_" + tag + ".csv");
+            File out = new File(dir, "TW_" + tag + ".csv");
 
             try (FileWriter fw = new FileWriter(out, false)) {
                 String header;
