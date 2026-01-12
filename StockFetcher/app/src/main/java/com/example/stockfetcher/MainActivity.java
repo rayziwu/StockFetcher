@@ -881,7 +881,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 if (!stockId.isEmpty() && !stockId.equalsIgnoreCase(currentStockId)) {
                     carouselActive = false;
                     updateCarouselPosUi();
-
+                    rememberMainCandlePixelWidthForNextRedraw();
                     fetchStockDataWithFallback(
                             stockId,
                             currentInterval,
@@ -2112,16 +2112,18 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         int n = screenerResults.size();
         screenerIndex = (idx % n + n) % n;
 
-        // ✅ 進入輪播/輪播中
-        carouselActive = true;
-        updateCarouselPosUi(); // 也可放在最後；放這裡會更即時
-
         String t = screenerResults.get(screenerIndex).ticker;
 
         suppressNextStockIdFocusFetch = true;
         stockIdEditText.setText(t);
 
+        // ✅ 輪播換主股票前：記住目前 K 柱像素寬度，下一輪重畫後還原
+        rememberMainCandlePixelWidthForNextRedraw();
+
         executeFetchForFilteredTicker(t, forceDownload);
+
+        carouselActive = true;
+        updateTopOutsideMainChartUi();
     }
     private String getScreenerModeLabel(ScreenerMode mode) {
         if (mode == null) return "";
@@ -3394,6 +3396,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         updateKkdLegendForMode();   // ✅ 圖例跟著模式切換
         updateComparisonInputVisibility();
         k_kdChart.notifyDataSetChanged();
+        // ✅ 切換模式後處理 highlight：離開成交量就清掉；切到成交量就依 mainChart 同步
+        if (kkdViewMode == KkdViewMode.VOL) {
+            syncKkdHighlightFromMain();   // 會用 mainChart highlight 亮起對應 bar（若主圖沒游標就會清掉）
+        } else {
+            k_kdChart.highlightValues(null);
+            k_kdChart.invalidate();
+        }
     }
     private void updateComparisonInputVisibility() {
         if (comparisonStockIdEditText == null) return;
@@ -3701,6 +3710,18 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         // 同步副圖（你原本就有）
         syncChartsXAxisOnly();
+        mainChart.post(this::syncChartsXAxisOnly);
+    }
+    private void rememberMainCandlePixelWidthForNextRedraw() {
+        if (mainChart == null || mainChart.getData() == null) return;
+
+        XAxis x = mainChart.getXAxis();
+        float range = x.getAxisMaximum() - x.getAxisMinimum();
+        if (range <= 0f || Float.isNaN(range) || Float.isInfinite(range)) return;
+
+        savedMainScaleX = mainChart.getViewPortHandler().getScaleX();
+        savedMainXRange = range;
+        pendingRestoreCandleWidth = true;
     }
     private List<StockDayPrice> getDisplayedList(List<StockDayPrice> fullList) {
         return fullList;
@@ -4310,34 +4331,30 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         if (vpView != null && vpView.getVisibility() == View.VISIBLE) vpView.invalidate();
     }
     private void syncChartsXAxisOnly() {
-        syncChartXAxisOnly(mainChart, k_kdChart);
-        syncChartXAxisOnly(mainChart, indicatorChart);
+        syncChartX(mainChart, k_kdChart);
+        syncChartX(mainChart, indicatorChart);
     }
 
-    private void syncChartXAxisOnly(CombinedChart src, CombinedChart dst) {
+    private void syncChartX(
+            com.github.mikephil.charting.charts.BarLineChartBase<?> src,
+            com.github.mikephil.charting.charts.BarLineChartBase<?> dst
+    ) {
         if (src == null || dst == null) return;
+        if (src.getData() == null || dst.getData() == null) return;
 
-        Matrix srcM = src.getViewPortHandler().getMatrixTouch();
-        float[] sv = new float[9];
-        srcM.getValues(sv);
+        android.graphics.Matrix srcM = src.getViewPortHandler().getMatrixTouch();
+        android.graphics.Matrix dstM = new android.graphics.Matrix(dst.getViewPortHandler().getMatrixTouch());
 
-        Matrix dstM = dst.getViewPortHandler().getMatrixTouch();
-        float[] dv = new float[9];
-        dstM.getValues(dv);
+        float[] s = new float[9];
+        float[] d = new float[9];
+        srcM.getValues(s);
+        dstM.getValues(d);
 
-        // 只跟隨 X：縮放 + 平移
-        dv[Matrix.MSCALE_X] = sv[Matrix.MSCALE_X];
-        dv[Matrix.MTRANS_X] = sv[Matrix.MTRANS_X];
+        // 只同步 X：縮放與平移
+        d[android.graphics.Matrix.MSCALE_X] = s[android.graphics.Matrix.MSCALE_X];
+        d[android.graphics.Matrix.MTRANS_X] = s[android.graphics.Matrix.MTRANS_X];
 
-        // 關閉 Y 跟隨（鎖死 Y）
-        dv[Matrix.MSCALE_Y] = 1f;
-        dv[Matrix.MTRANS_Y] = 0f;
-
-        // 通常 skew 不用，但保險歸零
-        dv[Matrix.MSKEW_X] = 0f;
-        dv[Matrix.MSKEW_Y] = 0f;
-
-        dstM.setValues(dv);
+        dstM.setValues(d);
         dst.getViewPortHandler().refresh(dstM, dst, true);
     }
 
