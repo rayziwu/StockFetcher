@@ -155,7 +155,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private List<StockDayPrice> lastDisplayedListForIndicator = null;
     enum KkdViewMode { KD, VOL, COMP }
     private KkdViewMode kkdViewMode = KkdViewMode.KD;
-
+    private boolean pendingRestoreCandleWidth = false;
+    private float savedMainScaleX = 1f;
+    private float savedMainXRange = -1f;
     // k_kdChart 切換需要用到的「目前顯示資料」
     @androidx.annotation.Nullable
     private List<StockDayPrice> lastDisplayedListForKkd;
@@ -902,6 +904,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             intervalSwitchButton.setText(displayText[currentIntervalIndex]);
 
             updateDateInputByInterval(currentInterval);
+
+            if (mainChart != null && mainChart.getData() != null) {
+                savedMainScaleX = mainChart.getViewPortHandler().getScaleX();
+                XAxis x = mainChart.getXAxis();
+                savedMainXRange = x.getAxisMaximum() - x.getAxisMinimum();
+                pendingRestoreCandleWidth = true;
+            }
+
             comparisonPriceList.clear();
             executeCustomDataFetch();
 
@@ -3649,18 +3659,48 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         if (comparisonStockIdEditText != null) comparisonStockIdEditText.setText(displayedComparisonSymbol);
 
-        mainChart.fitScreen();
-        updateGapLabelVisibility();
+        if (!pendingRestoreCandleWidth) {
+            mainChart.fitScreen();
+            k_kdChart.fitScreen();
+            indicatorChart.fitScreen();
+        }
 
+        updateGapLabelVisibility();
         resetKDJAndComparisonAxisLimits();
 
-        k_kdChart.fitScreen();
-        indicatorChart.fitScreen();
+// ✅ 切 interval 後：保持K柱像素寬度
+        restoreMainCandlePixelWidthIfNeeded();
 
         mainChart.invalidate();
         k_kdChart.invalidate();
         indicatorChart.invalidate();
         vpView.invalidate();
+    }
+
+    private void restoreMainCandlePixelWidthIfNeeded() {
+        if (!pendingRestoreCandleWidth) return;
+        pendingRestoreCandleWidth = false;
+
+        if (mainChart == null || mainChart.getData() == null) return;
+
+        XAxis x = mainChart.getXAxis();
+        float newRange = x.getAxisMaximum() - x.getAxisMinimum();
+        if (savedMainXRange <= 0f || newRange <= 0f) return;
+
+        float currentScaleX = mainChart.getViewPortHandler().getScaleX();
+        if (currentScaleX <= 0f) return;
+
+        // ✅ 關鍵：保持每根K柱像素寬度不變
+        float targetScaleX = savedMainScaleX * (newRange / savedMainXRange);
+        float zoomFactorX = targetScaleX / currentScaleX;
+
+        // 以右側為錨點縮放（通常符合你想看最新的習慣）
+        mainChart.zoom(zoomFactorX, 1f,
+                mainChart.getViewPortHandler().contentRight(),
+                mainChart.getViewPortHandler().contentTop());
+
+        // 同步副圖（你原本就有）
+        syncChartsXAxisOnly();
     }
     private List<StockDayPrice> getDisplayedList(List<StockDayPrice> fullList) {
         return fullList;
