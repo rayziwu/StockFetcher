@@ -210,7 +210,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     // key: Ticker（例 1101.TW），value: (ticker,name,industry)
     private final java.util.Map<String, FavoriteInfo> favoriteMap = new java.util.LinkedHashMap<>();
-
+    private KkdVolumeMarkerView kkdVolumeMarker;
     private static class FavoriteInfo {
         final String ticker;
         final String name;
@@ -3052,9 +3052,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         // 讓 Chart 自己先處理觸控（單點 highlight/marker、拖曳、縮放...），我們只額外偵測 double tap
         mainChart.setOnTouchListener((v, ev) -> {
             v.onTouchEvent(ev);                 // 交回給圖表：單點 marker 十字線就會正常
+
+            syncKkdHighlightFromMain();         // ✅ 新增：同步 k_kdChart 的 highlight 讓它的 Marker 畫數字
+
             mainTapDetector.onTouchEvent(ev);   // 只在 double tap 時切換
             if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
-            return true; // 我們已經手動把事件交給 mainChart.onTouchEvent 了，所以這裡直接吃掉避免重複
+            return true;
         });
 
         // vpView 蓋住 mainChart 時：也要支援「雙擊切換」，並且把觸控轉送給 mainChart 以保留 marker 十字線
@@ -3079,13 +3082,87 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             copy.offsetLocation(dx, dy);
 
             mainChart.onTouchEvent(copy);
+
+            syncKkdHighlightFromMain();             // ✅ 新增：vpView 上點擊也同步 k_kdChart
+
             copy.recycle();
 
             if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
             return true;
         });
     }
+    private void syncKkdHighlightFromMain() {
+        if (mainChart == null || k_kdChart == null) return;
 
+        // 只在成交量模式才同步
+        if (kkdViewMode != KkdViewMode.VOL) {
+            k_kdChart.highlightValues(null);
+            k_kdChart.invalidate();
+            return;
+        }
+
+        Highlight[] hs = mainChart.getHighlighted();
+        if (hs == null || hs.length == 0) {
+            k_kdChart.highlightValues(null);
+            k_kdChart.invalidate();
+            return;
+        }
+
+        if (k_kdChart.getData() == null) return;
+
+        int barDataIndex = findCombinedBarDataIndex(k_kdChart.getData());
+        if (barDataIndex < 0) {
+            k_kdChart.highlightValues(null);
+            k_kdChart.invalidate();
+            return;
+        }
+
+        int xInt = Math.round(hs[0].getX());
+
+        if (lastDisplayedListForKkd == null || xInt < 0 || xInt >= lastDisplayedListForKkd.size()) {
+            k_kdChart.highlightValues(null);
+            k_kdChart.invalidate();
+            return;
+        }
+
+        float x = (float) xInt;
+
+// ✅ y 要用「張」：要跟你 BarEntry 的 y 單位一致
+        final float VOLUME_DIVISOR = 1000f; // 若你的 BarEntry 本來就用張，保持；若用股數就改 1f
+        float yLots = (float) (lastDisplayedListForKkd.get(xInt).getVolume() / VOLUME_DIVISOR);
+
+        Highlight hh = new Highlight(
+                x, yLots,          // ✅ 關鍵：y 不要 0，改成實際 bar 的 y
+                0f, 0f,
+                0,                 // BarDataSet index
+                YAxis.AxisDependency.LEFT
+        );
+        hh.setDataIndex(barDataIndex);
+
+        // 保險：如果 setDataIndex 沒生效（極少數），就不要 highlightValue
+        if (hh.getDataIndex() < 0) {
+            k_kdChart.highlightValues(null);
+            k_kdChart.invalidate();
+            return;
+        }
+
+        k_kdChart.highlightValue(hh, false);
+        k_kdChart.invalidate();
+    }
+    private int findCombinedBarDataIndex(@androidx.annotation.Nullable com.github.mikephil.charting.data.ChartData<?> data) {
+        if (!(data instanceof com.github.mikephil.charting.data.CombinedData)) return -1;
+
+        com.github.mikephil.charting.data.CombinedData cd =
+                (com.github.mikephil.charting.data.CombinedData) data;
+
+        java.util.List<com.github.mikephil.charting.data.BarLineScatterCandleBubbleData> all = cd.getAllData();
+        if (all == null) return -1;
+
+        for (int i = 0; i < all.size(); i++) {
+            if (all.get(i) instanceof com.github.mikephil.charting.data.BarData) return i;
+        }
+        return -1;
+    }
     private void cycleMainViewMode() {
         currentViewModeIndex = (currentViewModeIndex + 1) % VIEW_MODES.length;
         if (lastDisplayedListForMain != null) {
@@ -3167,7 +3244,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         // 單點拿來切換，避免 highlight 干擾
         k_kdChart.setHighlightPerTapEnabled(false);
-        k_kdChart.setDrawMarkers(false);
 
         kkdTapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent e) { return true; }
@@ -3184,6 +3260,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
             return true;
         });
+
+        k_kdChart.setDrawMarkers(true);
+        k_kdChart.setHighlightPerTapEnabled(false); // 仍然保留單點切換，不靠點擊出游標
+        kkdVolumeMarker = new KkdVolumeMarkerView(this, lastDisplayedListForKkd);
+        kkdVolumeMarker.setChartView(k_kdChart);
+        k_kdChart.setMarker(kkdVolumeMarker);
     }
     private void cycleKkdViewMode() {
         switch (kkdViewMode) {
@@ -3546,6 +3628,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         // KD + 對比
         drawKDAndComparisonChartData(displayedList);
         lastDisplayedListForKkd = displayedList;
+        if (kkdVolumeMarker != null) kkdVolumeMarker.setDataList(displayedList);
 
 // 畫完資料後，依目前模式決定要顯示 KD/對比/兩者
         applyKkdViewModeToChart();
@@ -3582,19 +3665,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private List<StockDayPrice> getDisplayedList(List<StockDayPrice> fullList) {
         return fullList;
     }
-
-    private static final class ScreenerParams {
-        int ltThr = 20;   // KD40 < thr
-        int ltDays = 20;  // for N days
-
-        int gtThr = 45;   // KD40 > thr
-        int gtMin = 20;   // for N~M days
-        int gtMax = 30;
-
-        int maBandPct = 3; // |Close-MA60|/MA60 <= band%
-        int maDays = 20;   // for N days
-    }
-
     private void setKDJinterval(String interval) {
         if ("1h".equals(interval) || "1d".equals(interval)) {
             currentKDNPeriod = 40;
@@ -3658,6 +3728,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         set.setDrawValues(false);
         set.setColors(colors);
         set.setAxisDependency(YAxis.AxisDependency.LEFT); // ✅ 左軸
+
+        // ✅ 讓被選到的 bar 變「亮」而不是變暗
+        set.setHighlightEnabled(true);
+        set.setHighLightColor(Color.YELLOW);   // 或 Color.WHITE
+        try {
+            set.setHighLightAlpha(255);        // 最亮（若你的版本沒有這個方法就刪掉 try 區塊）
+        } catch (Throwable ignored) {}
+
 
         BarData barData = new BarData(set);
         barData.setBarWidth(0.8f);
@@ -4267,40 +4345,44 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             finalStartTime = getStartTimeLimit(currentInterval, isSwitchingInterval);
             Log.d("CheckDate", "Using Default (Fallback): " + finalStartTime);
         }
-
         fetchStockDataWithFallback(symbol, currentInterval, finalStartTime);
     }
-    public class CoordinateMarkerView extends com.github.mikephil.charting.components.MarkerView {
-        private final Paint textPaint;
-        private final List<StockDayPrice> dataList;
+    public class KkdVolumeMarkerView extends com.github.mikephil.charting.components.MarkerView {
 
-        public CoordinateMarkerView(Context context, List<StockDayPrice> dataList) {
+        private final Paint textPaint;
+        private List<StockDayPrice> dataList;
+
+        // 若你的 volume 本來就是張，改成 1f
+        private static final float VOLUME_DIVISOR = 1000f;
+
+        public KkdVolumeMarkerView(Context context, List<StockDayPrice> dataList) {
             super(context, android.R.layout.select_dialog_item);
             this.dataList = dataList;
+
             textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
             textPaint.setTextSize(30f);
             textPaint.setColor(Color.YELLOW);
+            textPaint.setTextAlign(Paint.Align.LEFT);
         }
-        // CoordinateMarkerView 內新增
+
+        public void setDataList(List<StockDayPrice> list) {
+            this.dataList = list;
+        }
+
         private float dp(float v) {
             return v * getResources().getDisplayMetrics().density;
         }
 
         private float getLegendHeightPx(CombinedChart chart) {
             Legend lg = chart.getLegend();
-
-            // MPAndroidChart 會在繪製 legend 時把每一行的 size 算好放進去
             List<com.github.mikephil.charting.utils.FSize> lines = lg.getCalculatedLineSizes();
-
-// 若還沒算到（極少數第一次），用一行高度當 fallback
             float oneLine = Math.max(lg.getTextSize(), lg.getFormSize());
-
             if (lines == null || lines.isEmpty()) return oneLine;
 
             float h = 0f;
             for (com.github.mikephil.charting.utils.FSize s : lines) h += s.height;
 
-// 行距：兩行之間加 yEntrySpace
+            // 這裡你原本 main marker 用 lg.getYEntrySpace()，沿用同樣寫法即可
             h += lg.getYEntrySpace() * (lines.size() - 1);
             return Math.max(h, oneLine);
         }
@@ -4310,24 +4392,175 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             if (getChartView() == null || getChartView().getHighlighted() == null
                     || getChartView().getHighlighted().length == 0) return;
 
-            Highlight h = getChartView().getHighlighted()[0];
-            int index = (int) h.getX();
-            if (index < 0 || index >= dataList.size()) return;
-
             CombinedChart chart = (CombinedChart) getChartView();
+            Highlight h = chart.getHighlighted()[0];
+
+            int index = Math.round(h.getX());
+            if (dataList == null || index < 0 || index >= dataList.size()) return;
+
             Legend lg = chart.getLegend();
 
             float left = chart.getViewPortHandler().contentLeft();
             float top  = chart.getViewPortHandler().contentTop();
 
-            float baseX = left + lg.getXOffset() + dp(4);
-            float baseY = top + lg.getYOffset() + getLegendHeightPx(chart) + dp(8); // ✅ 固定在圖例下方
+            // 跟你 main marker 一樣：固定畫在圖例下方
+            float baseX = left + lg.getXOffset() + dp(16);
+            float baseY = top + lg.getYOffset() + getLegendHeightPx(chart) + dp(8);
 
-            String priceText = String.format(Locale.US, "%.2f", h.getY());
-            String dateText  = dataList.get(index).getDate();
+            long lots = Math.round(dataList.get(index).getVolume() / VOLUME_DIVISOR); // 張數整數
+            canvas.drawText(String.valueOf(lots), baseX, baseY, textPaint);
+        }
+    }
+    public class CoordinateMarkerView extends com.github.mikephil.charting.components.MarkerView {
+        private final Paint textPaint;
+        private final Paint measurePaint;
+        private final List<StockDayPrice> dataList;
 
-            canvas.drawText(priceText, baseX, baseY, textPaint);
-            canvas.drawText(dateText,  baseX, baseY + dp(16), textPaint);
+        public CoordinateMarkerView(Context context, List<StockDayPrice> dataList) {
+            super(context, android.R.layout.select_dialog_item);
+            this.dataList = dataList;
+
+            textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            textPaint.setTextSize(30f);
+            textPaint.setColor(Color.YELLOW);
+
+            measurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        }
+
+        private float dp(float v) {
+            return v * getResources().getDisplayMetrics().density;
+        }
+
+        private float getLegendHeightPx(CombinedChart chart) {
+            Legend lg = chart.getLegend();
+            List<com.github.mikephil.charting.utils.FSize> lines = lg.getCalculatedLineSizes();
+            float oneLine = Math.max(lg.getTextSize(), lg.getFormSize());
+            if (lines == null || lines.isEmpty()) return oneLine;
+
+            float h = 0f;
+            for (com.github.mikephil.charting.utils.FSize s : lines) h += s.height;
+            h += lg.getYEntrySpace() * (lines.size() - 1);
+            return Math.max(h, oneLine);
+        }
+
+        private String fmt(Float v) {
+            if (v == null || Float.isNaN(v) || Float.isInfinite(v)) return "--";
+            float av = Math.abs(v);
+            return (av >= 100f)
+                    ? String.format(Locale.US, "%.0f", v)
+                    : String.format(Locale.US, "%.2f", v);
+        }
+
+        private Float getMaY(CombinedChart chart, int dsIndex, float x) {
+            com.github.mikephil.charting.data.LineData ld = chart.getLineData();
+            if (ld == null || dsIndex < 0 || dsIndex >= ld.getDataSetCount()) return null;
+
+            com.github.mikephil.charting.interfaces.datasets.ILineDataSet ds = ld.getDataSetByIndex(dsIndex);
+            if (ds == null || !ds.isVisible()) return null;
+
+            com.github.mikephil.charting.data.Entry e = ds.getEntryForXValue(
+                    x, Float.NaN, com.github.mikephil.charting.data.DataSet.Rounding.CLOSEST);
+            return (e == null) ? null : e.getY();
+        }
+
+        private Float getClose(CombinedChart chart, float x) {
+            com.github.mikephil.charting.data.CandleData cd = chart.getCandleData();
+            if (cd == null || cd.getDataSetCount() <= 0) return null;
+
+            com.github.mikephil.charting.interfaces.datasets.ICandleDataSet ds = cd.getDataSetByIndex(0);
+            if (ds == null || !ds.isVisible()) return null;
+
+            com.github.mikephil.charting.data.CandleEntry ce = ds.getEntryForXValue(
+                    x, Float.NaN, com.github.mikephil.charting.data.DataSet.Rounding.CLOSEST);
+            return (ce == null) ? null : ce.getClose();
+        }@Override
+        public void draw(Canvas canvas, float posX, float posY) {
+            if (getChartView() == null || getChartView().getHighlighted() == null
+                    || getChartView().getHighlighted().length == 0) return;
+
+            CombinedChart chart = (CombinedChart) getChartView();
+            Highlight h = chart.getHighlighted()[0];
+            int index = Math.round(h.getX());
+            if (index < 0 || index >= dataList.size()) return;
+
+            Legend lg = chart.getLegend();
+
+            float left = chart.getViewPortHandler().contentLeft();
+            float top  = chart.getViewPortHandler().contentTop();
+
+            // ✅ Legend 的 offset 是 dp，要轉 px
+            float baseX = left + lg.getXOffset() + dp(16);
+            float baseY = top + lg.getYOffset() + getLegendHeightPx(chart) + dp(8);
+            // 取得要顯示的 3 個數字（MA1 / MA2 / Close）
+            float x = h.getX();
+            String ma1Text = fmt(getMaY(chart, 0, x));
+            String ma2Text = fmt(getMaY(chart, 1, x));
+            String closeText = fmt(getClose(chart, x));
+
+            LegendEntry[] entries = lg.getEntries();
+            if (entries == null) entries = new LegendEntry[0];
+            int c = entries.length;
+
+            // labelSizes 是 px（MPAndroidChart 已算好）
+            List<com.github.mikephil.charting.utils.FSize> labelSizes = lg.getCalculatedLabelSizes();
+
+            // fallback measure（用 legend 文字大小/字型）
+            Paint lp = new Paint(Paint.ANTI_ALIAS_FLAG);
+            lp.setTextSize(lg.getTextSize());
+            if (lg.getTypeface() != null) lp.setTypeface(lg.getTypeface());
+
+            // 數字要靠左
+            textPaint.setTextAlign(Paint.Align.LEFT);
+
+            float curX = baseX;
+
+            // ✅ Legend spacing 都是 dp，要先轉 px（避免累積偏差）
+            float f2tPx = dp(lg.getFormToTextSpace());
+            float xEntrySpacePx = dp(lg.getXEntrySpace());
+
+            for (int i = 0; i < c; i++) {
+                // 依 legend entry 數量決定顯示哪個值（你目前 legend 順序：MA1、MA2、K線）
+                String v;
+                if (c == 1) {
+                    v = closeText;
+                } else if (c == 2) {
+                    v = (i == 0) ? ma1Text : closeText;
+                } else { // c >= 3
+                    v = (i == 0) ? ma1Text : (i == 1 ? ma2Text : closeText);
+                }
+
+                // 畫在每個 entry block 的左邊界
+                canvas.drawText(v, curX, baseY, textPaint);
+
+                // label 寬（px）
+                float labelW;
+                if (labelSizes != null && i < labelSizes.size()) {
+                    labelW = labelSizes.get(i).width;
+                } else {
+                    String label = (entries[i].label == null) ? "" : entries[i].label;
+                    labelW = lp.measureText(label);
+                }
+
+                // form 寬（dp->px）
+                boolean hasForm = (entries[i].form != Legend.LegendForm.NONE);
+                float formWdp = (!Float.isNaN(entries[i].formSize)) ? entries[i].formSize : lg.getFormSize();
+                float formWpx = dp(formWdp);
+
+                // 推進到下一個 entry 起點
+                float entryW = 0f;
+                if (hasForm) {
+                    entryW += formWpx;
+                    if (labelW > 0f) entryW += f2tPx;
+                }
+                entryW += labelW;
+
+                curX += entryW + xEntrySpacePx;
+            }
+
+            // 日期顯示維持不變（下一行、從 baseX 開始）
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            String dateText = dataList.get(index).getDate();
+            canvas.drawText(dateText, baseX, baseY + dp(16), textPaint);
         }
     }
     // RSI
