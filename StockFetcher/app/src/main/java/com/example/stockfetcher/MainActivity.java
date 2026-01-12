@@ -902,6 +902,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             intervalSwitchButton.setText(displayText[currentIntervalIndex]);
 
             updateDateInputByInterval(currentInterval);
+            comparisonPriceList.clear();
             executeCustomDataFetch();
 
             isSwitchingInterval = false;
@@ -3994,41 +3995,64 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             k_kdChart.setNoDataText("KD/成交量/對比 K 線圖：無對比 K 線數據可供繪製。");
             combinedData.setData(new CandleData());
         } else {
-            Map<String, StockDayPrice> compMap = new HashMap<>();
-            for (StockDayPrice p : comparisonPriceList) compMap.put(p.getDate(), p);
 
-            List<CandleEntry> entries = new ArrayList<>();
-            for (int i = 0; i < displayedMainList.size(); i++) {
-                StockDayPrice cp = compMap.get(displayedMainList.get(i).getDate());
-                if (cp == null) continue;
-                entries.add(new CandleEntry(i,
-                        (float) cp.getHigh(), (float) cp.getLow(),
-                        (float) cp.getOpen(), (float) cp.getClose()));
-            }
-
-            if (!entries.isEmpty()) {
-                String kLineLabel = displayedComparisonSymbol;
-
-                CandleDataSet set = new CandleDataSet(entries, kLineLabel);
-                set.setDrawIcons(false);
-                set.setShadowColor(Color.GRAY);
-                set.setShadowWidth(0.7f);
-
-                final int DECREASING_COLOR = Color.GREEN;
-                final int INCREASING_COLOR = Color.RED;
-
-                set.setDecreasingColor(DECREASING_COLOR);
-                set.setDecreasingPaintStyle(Paint.Style.STROKE);
-                set.setIncreasingColor(INCREASING_COLOR);
-                set.setIncreasingPaintStyle(Paint.Style.STROKE);
-                set.setNeutralColor(Color.WHITE);
-                set.setDrawValues(false);
-                set.setAxisDependency(YAxis.AxisDependency.LEFT);
-
-                combinedData.setData(new CandleData(set));
-                customEntries.add(new LegendEntry(kLineLabel, Legend.LegendForm.SQUARE, 10f, 0f, null, INCREASING_COLOR));
-            } else {
+            // ✅ 關鍵：對比資料也要 clean 成同一個 interval，否則月K/週K 日期很難對齊
+            List<StockDayPrice> compClean = OhlcCleaners.cleanOhlc(comparisonPriceList, currentInterval);
+            if (compClean == null || compClean.isEmpty()) {
                 combinedData.setData(new CandleData());
+            } else {
+                // ✅ 也用相同的 displayed 規則（你的 getDisplayedList）
+                List<StockDayPrice> compDisplayed = getDisplayedList(compClean);
+                if (compDisplayed == null || compDisplayed.isEmpty()) {
+                    combinedData.setData(new CandleData());
+                } else {
+
+                    int mainN = displayedMainList.size();
+                    int compN = compDisplayed.size();
+                    int takeN = Math.min(mainN, compN);
+
+                    int startComp = compN - takeN;   // 對比取最後 takeN 根
+                    int startX = mainN - takeN;      // 放到主資料尾端 -> 保證右對齊
+
+                    List<CandleEntry> entries = new ArrayList<>(takeN);
+                    for (int i = 0; i < takeN; i++) {
+                        StockDayPrice cp = compDisplayed.get(startComp + i);
+                        int x = startX + i;
+
+                        entries.add(new CandleEntry(
+                                x,
+                                (float) cp.getHigh(),
+                                (float) cp.getLow(),
+                                (float) cp.getOpen(),
+                                (float) cp.getClose()
+                        ));
+                    }
+
+                    if (!entries.isEmpty()) {
+                        String kLineLabel = displayedComparisonSymbol;
+
+                        CandleDataSet set = new CandleDataSet(entries, kLineLabel);
+                        set.setDrawIcons(false);
+                        set.setShadowColor(Color.GRAY);
+                        set.setShadowWidth(0.7f);
+
+                        final int DECREASING_COLOR = Color.GREEN;
+                        final int INCREASING_COLOR = Color.RED;
+
+                        set.setDecreasingColor(DECREASING_COLOR);
+                        set.setDecreasingPaintStyle(Paint.Style.STROKE);
+                        set.setIncreasingColor(INCREASING_COLOR);
+                        set.setIncreasingPaintStyle(Paint.Style.STROKE);
+                        set.setNeutralColor(Color.WHITE);
+                        set.setDrawValues(false);
+                        set.setAxisDependency(YAxis.AxisDependency.LEFT);
+
+                        combinedData.setData(new CandleData(set));
+                        customEntries.add(new LegendEntry(kLineLabel, Legend.LegendForm.SQUARE, 10f, 0f, null, INCREASING_COLOR));
+                    } else {
+                        combinedData.setData(new CandleData());
+                    }
+                }
             }
         }
 
