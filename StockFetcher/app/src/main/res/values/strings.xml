@@ -136,6 +136,11 @@
     <string name="toast_csv_saved">Saved: %1$s</string>
     <string name="toast_favorites_replaced">Favorites replaced by: %1$s</string>
     <string name="label_carousel_prefix">Carousel:</string>
+    <string name="dialog_pick_favorite_file_title">Choose favorites file</string>
+    <string name="dialog_new_favorite_file_title">New favorites file</string>
+    <string name="dialog_new_favorite_file_msg">Enter file name:</string>
+    <string name="error_favorite_filename_prefix">Filename must start with “最愛”.</string>
+    <string name="toast_added_to_favorite_file">Saved to: %1$s</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>

@@ -135,6 +135,12 @@
     <string name="toast_favorites_replaced">已用此檔案取代最愛清單：%1$s</string>
     <string name="label_carousel_prefix">輪播:</string>
 
+    <string name="dialog_pick_favorite_file_title">選擇最愛檔案</string>
+    <string name="dialog_new_favorite_file_title">新增最愛檔案</string>
+    <string name="dialog_new_favorite_file_msg">請輸入檔名：</string>
+    <string name="error_favorite_filename_prefix">檔名必須以「最愛」開頭。</string>
+    <string name="toast_added_to_favorite_file">已存入：%1$s</string>
+
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>
         <item>@string/div_tf_day</item>

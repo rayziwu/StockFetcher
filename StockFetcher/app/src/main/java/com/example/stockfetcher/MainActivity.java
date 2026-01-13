@@ -640,10 +640,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         btnFavorite.setFocusable(true);
         btnFavorite.setTextColor(android.graphics.Color.RED);
 
-        // 關鍵：把愛心拉到最上層，避免被 vpView 或其他透明 view 擋住觸控
+        // 如果你的 btnFavorite 仍是 overlay（會被 vpView 蓋住），保留這兩行；
+        // 若 btnFavorite 已移到 top bar（不在 chart overlay），留著也不影響
         btnFavorite.bringToFront();
         androidx.core.view.ViewCompat.setElevation(btnFavorite, 100f);
 
+        // ✅ 短按：維持原本加入/移除（寫入 activeFavoritesFile）
         btnFavorite.setOnClickListener(v -> {
             String t = getCurrentMainTickerKey();
             android.util.Log.d(TAG, "♥/♡ clicked, currentStockId=" + currentStockId + ", key=" + t);
@@ -653,7 +655,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             updateTopOutsideMainChartUi();
         });
 
+        // ✅ 長按：跳出「最愛檔案清單 + '+'」並依選擇加入後存檔、切換 activeFavoritesFile
+        btnFavorite.setOnLongClickListener(v -> {
+            showFavoriteFilePickerThenAddCurrent();
+            return true; // ⚠️ 一定要 true，避免長按後又觸發短按 click
+        });
+
         updateFavoriteButtonState();
+        updateTopOutsideMainChartUi();
     }
     private void updateFavoriteButtonState() {
         if (btnFavorite == null) return;
@@ -3403,6 +3412,176 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             k_kdChart.highlightValues(null);
             k_kdChart.invalidate();
         }
+    }
+    private void showFavoriteFilePickerThenAddCurrent() {
+        String ticker = getCurrentMainTickerKey();
+        if (ticker == null || ticker.trim().isEmpty()) return;
+
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null || !dir.exists()) {
+            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        java.io.File[] files = dir.listFiles((d, name) ->
+                name != null
+                        && name.startsWith("最愛")
+                        && name.toLowerCase(java.util.Locale.US).endsWith(".csv"));
+
+        java.util.ArrayList<java.io.File> favFiles = new java.util.ArrayList<>();
+        if (files != null) {
+            java.util.Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+            for (java.io.File f : files) favFiles.add(f);
+        }
+
+        java.util.ArrayList<String> items = new java.util.ArrayList<>();
+        items.add("+");
+        for (java.io.File f : favFiles) items.add(f.getName());
+
+        android.widget.ListView lv = new android.widget.ListView(this);
+        android.widget.ArrayAdapter<String> ad =
+                new android.widget.ArrayAdapter<>(this, android.R.layout.simple_list_item_1, items);
+        lv.setAdapter(ad);
+
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_pick_favorite_file_title)
+                .setView(lv)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+
+        lv.setOnItemClickListener((parent, view, pos, id) -> {
+            if (pos == 0) {
+                showCreateFavoriteFileDialog(dlg);
+                return;
+            }
+
+            java.io.File selected = favFiles.get(pos - 1);
+            dlg.dismiss();
+            selectFavoriteFileAndAddCurrent(selected);
+        });
+
+        dlg.show();
+    }
+    private void selectFavoriteFileAndAddCurrent(java.io.File f) {
+        if (f == null) return;
+
+        // 1) 切換目前最愛檔 + 載入清單（favoriteMap 會被替換）
+        setActiveFavoritesFileAndReload(f);
+
+        // 2) 把目前主股票加入（若已存在就不重複）
+        boolean changed = addCurrentMainToFavoriteMapIfAbsent();
+
+        // 3) 存檔（寫到 activeFavoritesFile）
+        if (changed) {
+            saveFavoritesToFile();
+        }
+
+        updateFavoriteButtonState();
+        updateTopOutsideMainChartUi();
+
+        Toast.makeText(this,
+                getString(R.string.toast_added_to_favorite_file, f.getName()),
+                Toast.LENGTH_SHORT).show();
+    }
+
+    private boolean addCurrentMainToFavoriteMapIfAbsent() {
+        String ticker = getCurrentMainTickerKey();
+        if (ticker == null || ticker.trim().isEmpty()) return false;
+
+        ticker = ticker.trim().toUpperCase(java.util.Locale.US);
+        if (favoriteMap.containsKey(ticker)) return false;
+
+        String name = "";
+        String industry = "";
+
+        if (tickerMetaMap != null) {
+            TickerInfo info = tickerMetaMap.get(ticker);
+            if (info == null) {
+                String base = ticker.replace(".TW", "").replace(".TWO", "");
+                info = tickerMetaMap.get(base);
+            }
+            if (info != null) {
+                name = info.name;
+                industry = info.industry;
+            }
+        }
+
+        favoriteMap.put(ticker, new FavoriteInfo(ticker, name, industry));
+        return true;
+    }
+    private void showCreateFavoriteFileDialog(androidx.appcompat.app.AlertDialog parentDlg) {
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null || !dir.exists()) {
+            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        final android.widget.EditText et = new android.widget.EditText(this);
+        et.setSingleLine(true);
+
+        String suggested = suggestFavoriteFileName(dir); // 最愛.csv / 最愛1.csv / ...
+        et.setText(suggested);
+        if (et.getText() != null) et.setSelection(et.getText().length());
+
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_new_favorite_file_title)
+                .setMessage(R.string.dialog_new_favorite_file_msg)
+                .setView(et)
+                .setNegativeButton(android.R.string.cancel, null) // 取消：回上一層（parentDlg 還在）
+                .setPositiveButton(android.R.string.ok, null)
+                .create();
+
+        dlg.show();
+
+        android.widget.Button ok = dlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE);
+        ok.setOnClickListener(v -> {
+            String input = (et.getText() == null) ? "" : et.getText().toString().trim();
+            String name = sanitizeCsvFileName(input);
+            if (name == null) {
+                Toast.makeText(this, getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (!name.startsWith("最愛")) {
+                Toast.makeText(this, getString(R.string.error_favorite_filename_prefix), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            java.io.File f = new java.io.File(dir, name);
+            if (f.exists()) {
+                Toast.makeText(this, getString(R.string.error_csv_name_exists, f.getName()), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            // 建立空的最愛檔（只有 header）
+            try (java.io.BufferedWriter bw = new java.io.BufferedWriter(
+                    new java.io.OutputStreamWriter(
+                            new java.io.FileOutputStream(f, false),
+                            java.nio.charset.StandardCharsets.UTF_8))) {
+                bw.write("Ticker,Name,Industry\n");
+                bw.flush();
+            } catch (Exception e) {
+                android.util.Log.e(TAG, "create favorite file failed", e);
+                Toast.makeText(this, getString(R.string.error_csv_save_failed), Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            dlg.dismiss();
+
+            // 回到上一個步驟：重開清單（簡單做法）
+            if (parentDlg != null) parentDlg.dismiss();
+            showFavoriteFilePickerThenAddCurrent();
+        });
+    }
+
+    private String suggestFavoriteFileName(java.io.File dir) {
+        java.io.File f0 = new java.io.File(dir, "最愛.csv");
+        if (!f0.exists()) return "最愛.csv";
+
+        for (int i = 1; i < 10000; i++) {
+            java.io.File f = new java.io.File(dir, "最愛" + i + ".csv");
+            if (!f.exists()) return f.getName();
+        }
+        return "最愛" + System.currentTimeMillis() + ".csv";
     }
     private void updateComparisonInputVisibility() {
         if (comparisonStockIdEditText == null) return;
