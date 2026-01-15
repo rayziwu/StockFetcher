@@ -161,6 +161,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     // k_kdChart 切換需要用到的「目前顯示資料」
     @androidx.annotation.Nullable
     private List<StockDayPrice> lastDisplayedListForKkd;
+    private GestureDetector kkdSwipeDetector;
 
     private static int clampInt(int v, int lo, int hi) {
         if (v < lo) return lo;
@@ -325,7 +326,58 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             return;
         }
     }
+    private void startCarouselFromFavoritesIfNeeded() {
+        if (carouselActive) return;
 
+        if (favoriteMap == null || favoriteMap.isEmpty()) {
+            Toast.makeText(this, getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // ✅ 把最愛檔案當作輪播檔案
+        activeCarouselFile = activeFavoritesFile;
+
+        // 用 favoriteMap 建立 screenerResults（含 name/industry，顯示輪播清單用）
+        screenerResults.clear();
+        for (FavoriteInfo fi : favoriteMap.values()) {
+            if (fi == null) continue;
+            String tk = (fi.ticker == null) ? "" : fi.ticker.trim().toUpperCase(java.util.Locale.US);
+            if (tk.isEmpty()) continue;
+
+            ScreenerResult r = new ScreenerResult(
+                    tk,
+                    fi.name == null ? "" : fi.name,
+                    fi.industry == null ? "" : fi.industry,
+                    Double.NaN, Double.NaN,
+                    null, null, null, null, null, null
+            );
+            screenerResults.add(r);
+        }
+
+        if (screenerResults.isEmpty()) {
+            Toast.makeText(this, getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 起始 index：若 currentStockId 在最愛清單內，就從它開始
+        int found = -1;
+        String cur = (currentStockId == null) ? "" : currentStockId.trim().toUpperCase(java.util.Locale.US);
+        for (int i = 0; i < screenerResults.size(); i++) {
+            if (screenerResults.get(i) != null
+                    && screenerResults.get(i).ticker != null
+                    && cur.equalsIgnoreCase(screenerResults.get(i).ticker.trim())) {
+                found = i;
+                break;
+            }
+        }
+        screenerIndex = (found >= 0) ? found : 0;
+
+        screenerSessionClosed = true;   // 這是最愛輪播，不是篩選 session
+        allowSaveOnSwipeUp = false;
+
+        carouselActive = true;
+        updateTopOutsideMainChartUi();
+    }
     private void initActiveFavoritesFileIfNeeded() {
         if (activeFavoritesFile != null) return;
 
@@ -769,46 +821,259 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         btnFavorite = findViewById(R.id.btnFavorite);
         tvTopOutsideMainChart = findViewById(R.id.tvTopOutsideMainChart);
         if (comparisonStockIdEditText != null) comparisonStockIdEditText.setVisibility(View.GONE);
+        tvTopOutsideMainChart.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+        tvTopOutsideMainChart.setHighlightColor(android.graphics.Color.TRANSPARENT); // 點擊不出現底色
     }
 
     private void updateTopOutsideMainChartUi() {
         if (tvTopOutsideMainChart == null) return;
 
-        // ===== 永遠顯示：最愛檔名(數量) =====
+        // --- 文字內容 ---
         String favName = (activeFavoritesFile != null)
                 ? stripCsvExt(activeFavoritesFile.getName())
-                : stripCsvExt(FAVORITES_FILE); // FAVORITES_FILE = "最愛.csv" 的話會變 "最愛"
+                : stripCsvExt(FAVORITES_FILE);
 
         int favCount = (favoriteMap != null) ? favoriteMap.size() : 0;
 
-        StringBuilder sb = new StringBuilder();
-        sb.append(favName).append("(").append(favCount).append(")");
+        String prefix = getString(R.string.label_carousel_prefix); // 輪播: / Carousel:
+        String carouselName = (activeCarouselFile != null) ? stripCsvExt(activeCarouselFile.getName()) : "";
 
-        // ===== 只有輪播時才顯示：輪播:檔名 序號/總數 =====
-        if (carouselActive && screenerResults != null && !screenerResults.isEmpty()) {
+        String pos = "";
+        boolean hasCarousel = carouselActive && screenerResults != null && !screenerResults.isEmpty();
+        if (hasCarousel) {
             int total = screenerResults.size();
             int idx1 = Math.max(0, Math.min(screenerIndex, total - 1)) + 1;
+            pos = idx1 + "/" + total;
+        }
 
-            String pos =  "(" + idx1 + "/" + total + ")";
+        String text = favName + "(" + favCount + ")";
+        if (hasCarousel && !carouselName.isEmpty()) {
+            text += "  " + prefix + carouselName + "  " + pos;
+        } else if (hasCarousel) {
+            text += "  " + pos;
+        }
 
-            String carouselName = (activeCarouselFile != null)
-                    ? stripCsvExt(activeCarouselFile.getName())
-                    : "";
+        // --- Spannable + Clickable spans ---
+        android.text.SpannableString ss = new android.text.SpannableString(text);
 
-            // 在輪播檔名前面加「輪播:」
-            if (!carouselName.isEmpty()) {
-                sb.append(" ")
-                        .append(getString(R.string.label_carousel_prefix))
-                        .append(carouselName)
-                        .append(" ")
-                        .append(pos);} else {
-                // 沒有輪播檔名：至少顯示序號/總數（你也可以選擇不顯示任何輪播資訊）
-                sb.append("  ").append(pos);
+        // ① 最愛檔名：只讓 favName 可點（不含 (數量)）
+        int favStart = 0;
+        int favEnd = favName.length();
+        if (favEnd > favStart) {
+            ss.setSpan(new android.text.style.ClickableSpan() {
+                @Override public void onClick(android.view.View widget) {
+                    showFavoritesStockListDialog();
+                }
+                @Override public void updateDrawState(android.text.TextPaint ds) {
+                    super.updateDrawState(ds);
+                    ds.setUnderlineText(false);
+                    ds.setColor(android.graphics.Color.WHITE);
+                }
+            }, favStart, favEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+
+        // ② 輪播檔名：只讓 carouselName 可點（不含 prefix）
+        if (hasCarousel && !carouselName.isEmpty()) {
+            int p = text.indexOf(prefix + carouselName);
+            if (p >= 0) {
+                int carStart = p + prefix.length();
+                int carEnd = carStart + carouselName.length();
+
+                ss.setSpan(new android.text.style.ClickableSpan() {
+                    @Override public void onClick(android.view.View widget) {
+                        showCarouselStockListDialog();
+                    }
+                    @Override public void updateDrawState(android.text.TextPaint ds) {
+                        super.updateDrawState(ds);
+                        ds.setUnderlineText(false);
+                        ds.setColor(android.graphics.Color.WHITE);
+                    }
+                }, carStart, carEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
         }
 
-        tvTopOutsideMainChart.setText(sb.toString());
+        tvTopOutsideMainChart.setText(ss);
         tvTopOutsideMainChart.setVisibility(android.view.View.VISIBLE);
+    }
+    private void showCarouselStockListDialog() {
+        // 優先：輪播結果清單（有 name 就直接用）
+        if (screenerResults != null && !screenerResults.isEmpty()) {
+            CharSequence[] items = new CharSequence[screenerResults.size()];
+            for (int i = 0; i < screenerResults.size(); i++) {
+                ScreenerResult r = screenerResults.get(i);
+                String tk = (r == null || r.ticker == null) ? "" : r.ticker.trim().toUpperCase(java.util.Locale.US);
+                String name = (r == null) ? "" : r.name;
+                String ind  = (r == null) ? "" : r.industry;
+                items[i] = buildTickerDisplayText(tk, name, ind);
+            }
+
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.dialog_pick_carousel_ticker_title)
+                    .setItems(items, (d, which) -> {
+                        // 這裡 which 就是 screenerResults 的 index，直接跳
+                        showFilteredAt(which, true);
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return;
+        }
+
+        // fallback：用 activeCarouselFile 讀 CSV 第一欄 ticker，名稱用 tickerMetaMap 補
+        if (activeCarouselFile != null && activeCarouselFile.exists()) {
+            java.util.List<String> tickers = readFirstColumnTickersFromCsv(activeCarouselFile);
+            if (tickers != null && !tickers.isEmpty()) {
+                showCarouselTickerPickerFromTickers(tickers);
+                return;
+            }
+        }
+
+        Toast.makeText(this, getString(R.string.toast_carousel_list_empty), Toast.LENGTH_SHORT).show();
+    }
+
+    private void showCarouselTickerPickerFromTickers(java.util.List<String> tickers) {
+        if (tickers == null || tickers.isEmpty()) return;
+
+        CharSequence[] items = new CharSequence[tickers.size()];
+        for (int i = 0; i < tickers.size(); i++) {
+            String tk = (tickers.get(i) == null) ? "" : tickers.get(i).trim().toUpperCase(java.util.Locale.US);
+            String[] ni = lookupTickerNameIndustry(tk);
+            items[i] = buildTickerDisplayText(tk, ni[0], ni[1]);
+        }
+
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_pick_carousel_ticker_title)
+                .setItems(items, (d, which) -> {
+                    String tk = tickers.get(which).trim().toUpperCase(java.util.Locale.US);
+
+                    // 這種情況沒有 screenerResults index 可跳，就直接當主股票畫
+                    carouselActive = false;
+                    updateTopOutsideMainChartUi();
+
+                    suppressNextStockIdFocusFetch = true;
+                    stockIdEditText.setText(tk);
+
+                    rememberMainCandlePixelWidthForNextRedraw();
+                    currentStockId = tk;
+                    fetchStockDataWithFallback(tk, currentInterval,
+                            getStartTimeLimit(currentInterval, isSwitchingInterval));
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private String lookupTickerName(String ticker) {
+        if (ticker == null) return "";
+        String key = ticker.trim().toUpperCase(java.util.Locale.US);
+        if (key.isEmpty()) return "";
+
+        if (tickerMetaMap != null) {
+            TickerInfo info = tickerMetaMap.get(key);
+            if (info == null) {
+                String base = key.replace(".TW", "").replace(".TWO", "");
+                info = tickerMetaMap.get(base);
+            }
+            if (info != null && info.name != null) {
+                return info.name.trim();
+            }
+        }
+        return "";
+    }
+    private void showFavoritesStockListDialog() {
+        if (favoriteMap == null || favoriteMap.isEmpty()) {
+            Toast.makeText(this, getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        java.util.ArrayList<FavoriteInfo> list = new java.util.ArrayList<>(favoriteMap.values());
+        list.sort((a, b) -> a.ticker.compareToIgnoreCase(b.ticker));
+
+        CharSequence[] items = new CharSequence[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            FavoriteInfo fi = list.get(i);
+            items[i] = buildTickerDisplayText(fi.ticker, fi.name, fi.industry);
+        }
+
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_pick_favorite_ticker_title)
+                .setItems(items, (d, which) -> {
+                    FavoriteInfo fi = list.get(which);
+                    String tk = fi.ticker.trim().toUpperCase(java.util.Locale.US);
+
+                    // ✅ 如果目前在輪播中：
+                    // 1) 若此股票也在輪播清單，直接跳到該 index（輪播序號也會更新，且從此繼續）
+                    if (carouselActive && screenerResults != null && !screenerResults.isEmpty()) {
+                        int found = -1;
+                        for (int i = 0; i < screenerResults.size(); i++) {
+                            ScreenerResult r = screenerResults.get(i);
+                            if (r != null && r.ticker != null
+                                    && tk.equalsIgnoreCase(r.ticker.trim())) {
+                                found = i;
+                                break;
+                            }
+                        }
+                        if (found >= 0) {
+                            showFilteredAt(found, true);
+                            return;
+                        }
+
+                        // 2) 若不在輪播清單：暫時看這檔，但不退出輪播（screenerIndex 不變）
+                        //    下次左右滑仍會照原輪播清單繼續
+                        suppressNextStockIdFocusFetch = true;
+                        stockIdEditText.setText(tk);
+
+                        rememberMainCandlePixelWidthForNextRedraw();
+                        currentStockId = tk;
+                        fetchStockDataWithFallback(tk, currentInterval,
+                                getStartTimeLimit(currentInterval, isSwitchingInterval));
+
+                        // 保持輪播狀態（不要設 carouselActive=false）
+                        updateTopOutsideMainChartUi();
+                        return;
+                    }
+
+                    // ✅ 非輪播狀態：維持原本行為（選最愛就退出輪播）
+                    carouselActive = false;
+                    updateTopOutsideMainChartUi();
+
+                    suppressNextStockIdFocusFetch = true;
+                    stockIdEditText.setText(tk);
+
+                    rememberMainCandlePixelWidthForNextRedraw();
+                    currentStockId = tk;
+                    fetchStockDataWithFallback(tk, currentInterval,
+                            getStartTimeLimit(currentInterval, isSwitchingInterval));
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+    private String buildTickerDisplayText(String ticker, String name, String industry) {
+        String tk = (ticker == null) ? "" : ticker.trim().toUpperCase(java.util.Locale.US);
+        String nm = (name == null) ? "" : name.trim();
+        String ind = (industry == null) ? "" : industry.trim();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(tk);
+
+        if (!nm.isEmpty()) sb.append(" ").append(nm);
+        if (!ind.isEmpty()) sb.append(" ").append(ind);
+
+        return sb.toString();
+    }
+
+    private String[] lookupTickerNameIndustry(String ticker) {
+        String tk = (ticker == null) ? "" : ticker.trim().toUpperCase(java.util.Locale.US);
+        if (tk.isEmpty() || tickerMetaMap == null) return new String[]{"", ""};
+
+        TickerInfo info = tickerMetaMap.get(tk);
+        if (info == null) {
+            String base = tk.replace(".TW", "").replace(".TWO", "");
+            info = tickerMetaMap.get(base);
+        }
+        if (info == null) return new String[]{"", ""};
+
+        String name = (info.name == null) ? "" : info.name.trim();
+        String ind  = (info.industry == null) ? "" : info.industry.trim();
+        return new String[]{name, ind};
     }
    private String stripCsvExt(String name) {
         if (name == null) return "";
@@ -1104,19 +1369,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         for (String t : tickers) {
             String tk = (t == null) ? "" : t.trim().toUpperCase(java.util.Locale.US);
             if (tk.isEmpty()) continue;
+            String[] ni = lookupTickerNameIndustry(tk);
             ScreenerResult r = new ScreenerResult(
-                        tk,            // ticker
-                        "",            // name
-                        "",            // industry
-                        Double.NaN,    // avgClose60 (unknown)
-                        Double.NaN,    // latestClose (unknown)
-                        null,          // lastK
-                        null,          // lastD
-                        null,          // runDays
-                        null,          // ma60
-                        null,          // ma60DiffPct
-                        null           // crossDate
-                );
+                    tk,
+                    ni[0],  // name
+                    ni[1],  // industry
+                    Double.NaN, Double.NaN, null, null, null, null, null, null
+            );
                 screenerResults.add(r);
         }
 
@@ -2634,9 +2893,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         k_kdChart.setHighlightPerTapEnabled(false);
         k_kdChart.setHighlightPerDragEnabled(false);
 
-        k_kdChart.setOnTouchListener((v, event) -> {
-            boolean handled = navGestureDetector.onTouchEvent(event);
-            // onTouchEvent 若沒處理，也把事件吃掉，避免 chart 自己處理
+        k_kdChart.setOnTouchListener((v, ev) -> {
+            v.onTouchEvent(ev);
+
+            kkdTapDetector.onTouchEvent(ev);   // 單點切換 KD/VOL/COMP
+            kkdSwipeDetector.onTouchEvent(ev); // ✅ 左右滑開始輪播/換下一檔
+
+            if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
             return true;
         });
     }
@@ -3280,6 +3543,37 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             kkdTapDetector.onTouchEvent(ev);// 單點切換
             if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
             return true;
+        });
+
+        final int minFling = android.view.ViewConfiguration.get(this).getScaledMinimumFlingVelocity();
+
+        kkdSwipeDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                float dx = e2.getX() - e1.getX();
+                float dy = e2.getY() - e1.getY();
+
+                if (Math.abs(dx) < Math.abs(dy) * 1.3f) return false;
+                if (Math.abs(velocityX) < minFling) return false;
+
+                boolean wasCarousel = carouselActive;
+
+                // ✅ 尚未輪播：先啟動輪播（用最愛檔），但這次不加減序號
+                if (!wasCarousel) {
+                    startCarouselFromFavoritesIfNeeded();
+                    if (!carouselActive) return false; // 最愛清單為空等情況
+
+                    // 第一次進入輪播：顯示目前 index（通常是第 1 檔）
+                    showFilteredAt(screenerIndex, true);
+                    return true;
+                }
+
+                // ✅ 已在輪播：向右 +1，向左 -1
+                int step = (dx > 0) ? 1 : -1;
+                showFilteredAt(screenerIndex + step, true);
+                return true;
+            }
         });
 
         k_kdChart.setDrawMarkers(true);
