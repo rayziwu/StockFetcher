@@ -828,58 +828,56 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void updateTopOutsideMainChartUi() {
         if (tvTopOutsideMainChart == null) return;
 
-        // --- 文字內容 ---
         String favName = (activeFavoritesFile != null)
                 ? stripCsvExt(activeFavoritesFile.getName())
                 : stripCsvExt(FAVORITES_FILE);
 
         int favCount = (favoriteMap != null) ? favoriteMap.size() : 0;
 
+        boolean hasCarousel = carouselActive && screenerResults != null && !screenerResults.isEmpty();
+
         String prefix = getString(R.string.label_carousel_prefix); // 輪播: / Carousel:
         String carouselName = (activeCarouselFile != null) ? stripCsvExt(activeCarouselFile.getName()) : "";
 
         String pos = "";
-        boolean hasCarousel = carouselActive && screenerResults != null && !screenerResults.isEmpty();
         if (hasCarousel) {
             int total = screenerResults.size();
             int idx1 = Math.max(0, Math.min(screenerIndex, total - 1)) + 1;
             pos = idx1 + "/" + total;
         }
 
-        String text = favName + "(" + favCount + ")";
-        if (hasCarousel && !carouselName.isEmpty()) {
-            text += "  " + prefix + carouselName + "  " + pos;
-        } else if (hasCarousel) {
-            text += "  " + pos;
-        }
+        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
 
-        // --- Spannable + Clickable spans ---
-        android.text.SpannableString ss = new android.text.SpannableString(text);
+        // ===== 最愛區塊：最愛檔名(數量) 可點 =====
+        int favStart = sb.length();
+        sb.append(favName).append("(").append(String.valueOf(favCount)).append(")");
+        int favEnd = sb.length();
 
-        // ① 最愛檔名：只讓 favName 可點（不含 (數量)）
-        int favStart = 0;
-        int favEnd = favName.length();
-        if (favEnd > favStart) {
-            ss.setSpan(new android.text.style.ClickableSpan() {
-                @Override public void onClick(android.view.View widget) {
-                    showFavoritesStockListDialog();
-                }
-                @Override public void updateDrawState(android.text.TextPaint ds) {
-                    super.updateDrawState(ds);
-                    ds.setUnderlineText(false);
-                    ds.setColor(android.graphics.Color.WHITE);
-                }
-            }, favStart, favEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
+        sb.setSpan(new android.text.style.ClickableSpan() {
+            @Override public void onClick(android.view.View widget) {
+                showFavoritesStockListDialog();
+            }
+            @Override public void updateDrawState(android.text.TextPaint ds) {
+                super.updateDrawState(ds);
+                ds.setUnderlineText(false);
+                ds.setColor(android.graphics.Color.WHITE);
+            }
+        }, favStart, favEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
-        // ② 輪播檔名：只讓 carouselName 可點（不含 prefix）
-        if (hasCarousel && !carouselName.isEmpty()) {
-            int p = text.indexOf(prefix + carouselName);
-            if (p >= 0) {
-                int carStart = p + prefix.length();
-                int carEnd = carStart + carouselName.length();
+        // ===== 輪播區塊：<檔名> 序號/總數 可點（不含「輪播:」）=====
+        if (hasCarousel) {
+            sb.append("  ");
+            sb.append(prefix); // prefix 不可點
 
-                ss.setSpan(new android.text.style.ClickableSpan() {
+            int carClickStart = sb.length(); // 可點從 prefix 後開始
+
+            if (!carouselName.isEmpty()) sb.append(carouselName);
+            if (!pos.isEmpty()) sb.append("  ").append(pos);
+
+            int carClickEnd = sb.length();
+
+            if (carClickEnd > carClickStart) {
+                sb.setSpan(new android.text.style.ClickableSpan() {
                     @Override public void onClick(android.view.View widget) {
                         showCarouselStockListDialog();
                     }
@@ -888,11 +886,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         ds.setUnderlineText(false);
                         ds.setColor(android.graphics.Color.WHITE);
                     }
-                }, carStart, carEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }, carClickStart, carClickEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
         }
 
-        tvTopOutsideMainChart.setText(ss);
+        tvTopOutsideMainChart.setText(sb);
         tvTopOutsideMainChart.setVisibility(android.view.View.VISIBLE);
     }
     private void showCarouselStockListDialog() {
