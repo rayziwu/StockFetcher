@@ -145,6 +145,7 @@
     <string name="dialog_pick_favorite_ticker_title">Favorites list</string>
     <string name="toast_carousel_list_empty">Carousel list is empty.</string>
     <string name="toast_favorites_empty">Favorites list is empty.</string>
+    <string name="screener_pick_from_file">Load from file</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>

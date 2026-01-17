@@ -7,6 +7,8 @@ import java.util.List;
 
 public final class ScreenerEngine {
 
+    private static final String TAG = "ScreenerEngine";
+
     // [ADD] parameter overrides from UI/service
     public static final class Overrides {
         public Integer ltThr;      // KD40 < thr
@@ -132,19 +134,15 @@ public final class ScreenerEngine {
         } else if (mode == ScreenerMode.KD_GC_RECENT) {
             interval = resolveKdGcInterval(ov);
         }
-        long startTime = getScreenerStartTimeSeconds(interval);
 
-        // ✅ interval 可能被 MACD divergence 的 timeframe 參數覆寫
-        interval = cfg.interval;
-        if (mode == ScreenerMode.MACD_DIV_RECENT) {
-            interval = resolveMacdDivInterval(ov);
-        }
+        long startTime = getScreenerStartTimeSeconds(interval);
 
         int total = tickers.size();
         int done = 0;
 
         List<ScreenerResult> out = new ArrayList<>();
-        startTime = getScreenerStartTimeSeconds(interval);
+
+
 
         // resolve overrides (with sane clamps)
         final double ltThr = (ov != null && ov.ltThr != null) ? clampD(ov.ltThr, 0, 100) : cfg.thr;
@@ -177,7 +175,14 @@ public final class ScreenerEngine {
             }
 
             // ✅ 用 interval（MACD divergence 可能是 1h/1d/1wk/1mo）
-            List<StockDayPrice> data = fetcher.fetchStockDataBlocking(info.ticker, interval, startTime);
+            List<StockDayPrice> data;
+            try {
+                data = fetcher.fetchStockDataBlocking(info.ticker, interval, startTime);
+            } catch (Exception e) {
+                // 單一 ticker 失敗：跳過，繼續篩選，不中止整批
+                // （YahooFinanceFetcher 那邊已經有印錯誤 log，這裡可不再印）
+                continue;
+            }
             if (data == null || data.isEmpty()) continue;
 
             // ✅ 第4項：MACD 背離（DIF/Hist 任一成立）
@@ -227,23 +232,41 @@ public final class ScreenerEngine {
             List<StockDayPrice> list,
             int lastBars
     ) {
-        if (list == null || list.size() < 3) return null;
+        String tk = (info == null || info.ticker == null) ? "(null)" : info.ticker;
 
-        // 保險：確保時間序（你的 fetcher 已 sort；這行留著也不會壞）
+        if (list == null || list.size() < 3) {
+            //android.util.Log.d(TAG, "KD_GC skip " + tk + " : list too short=" + (list == null ? -1 : list.size()));
+            return null;
+        }
+
+        // 保險：確保時間序
         list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
 
-        // 只用已算好的 kdK/kdD（優先使用已算好的KD資料）
+        //android.util.Log.d(TAG, "KD_GC check " + tk
+        //        + " lastBars=" + lastBars
+        //        + " size=" + list.size()
+        //        + " first=" + list.get(0).getDate()
+        //       + " last=" + list.get(list.size() - 1).getDate());
+
+        // 只用已算好的 kdK/kdD
         List<Integer> valid = new ArrayList<>();
         for (int i = 0; i < list.size(); i++) {
             if (isFinite(list.get(i).kdK) && isFinite(list.get(i).kdD)) valid.add(i);
         }
-        if (valid.size() < 2) return null;
+        if (valid.size() < 2) {
+            //android.util.Log.d(TAG, "KD_GC skip " + tk + " : valid KD < 2, valid=" + valid.size());
+            return null;
+        }
 
-        int need = Math.max(2, lastBars); // 需要至少兩根才判斷交叉
+        int need = Math.max(2, lastBars); // 至少兩根才判斷交叉
         int start = Math.max(1, valid.size() - need);
 
+        //android.util.Log.d(TAG, "KD_GC scan " + tk
+        //        + " validCount=" + valid.size()
+        //        + " need=" + need
+        //        + " scanValidPFrom=" + (valid.size() - 1) + " downTo=" + start);
+
         int crossIdx = -1;
-        int prevIdx = -1;
 
         // 從尾端往回找「最近一次」交叉發生在 lastBars 內
         for (int p = valid.size() - 1; p >= start; p--) {
@@ -256,14 +279,27 @@ public final class ScreenerEngine {
             double dCur  = list.get(i).kdD;
 
             boolean gc = (kPrev <= dPrev) && (kCur > dCur);
-            if (gc) {
+            boolean dBelow20 = (dCur < 20.0);
+            boolean kabove20 = (kCur > 20.0);
+
+            if (kabove20 && dBelow20 ) {
                 crossIdx = i;
-                prevIdx = j;
+
+                //android.util.Log.d(TAG, "KD_GC HIT " + tk
+                //        + " crossDate=" + list.get(crossIdx).getDate()
+                //        + " kPrev=" + kPrev + " dPrev=" + dPrev
+                //        + " kCur=" + kCur + " dCur=" + dCur
+                //        + " (kCur<25)");
                 break;
             }
         }
 
-        if (crossIdx < 0) return null;
+        if (crossIdx < 0) {
+            //android.util.Log.d(TAG, "K" +
+            //        "" +
+            //        "D_GC miss " + tk + " : no cross (kCur<25) within lastBars=" + lastBars);
+            return null;
+        }
 
         int n = list.size();
         String crossDate = list.get(crossIdx).getDate();

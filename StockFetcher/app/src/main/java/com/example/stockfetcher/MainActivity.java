@@ -163,6 +163,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private List<StockDayPrice> lastDisplayedListForKkd;
     private GestureDetector kkdSwipeDetector;
 
+    @androidx.annotation.Nullable
+    private String pendingTickerCsvPathForScreening = null;
+
     private static int clampInt(int v, int lo, int hi) {
         if (v < lo) return lo;
         if (v > hi) return hi;
@@ -1279,6 +1282,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             intervalSwitchButton.setText(displayText[currentIntervalIndex]);
         }
         updateDateInputByInterval(currentInterval);
+        Log.d(TAG, "applyIntervalForScreener target=" + target
+                + " currentInterval=" + currentInterval
+                + " idx=" + currentIntervalIndex
+                + " idxInterval=" + INTERVALS[currentIntervalIndex]);
     }
 
     private String mapTfToInterval(String tf) {
@@ -1830,7 +1837,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         it.putExtra(ScreenerForegroundService.EXTRA_KD_GC_BARS, activeKdGcBars);
         it.putExtra(ScreenerForegroundService.EXTRA_KD_GC_TF,   activeKdGcTf);
-
+        // ✅ 若使用「從檔案讀取」模式：把 CSV 路徑傳給 Service
+        if (pendingTickerCsvPathForScreening != null && !pendingTickerCsvPathForScreening.trim().isEmpty()) {
+            it.putExtra(ScreenerForegroundService.EXTRA_TICKER_CSV_PATH, pendingTickerCsvPathForScreening);
+            pendingTickerCsvPathForScreening = null; // 用完清掉
+        }
         androidx.core.content.ContextCompat.startForegroundService(this, it);
     }
     private void showScreenerModeDialog() {
@@ -2259,10 +2270,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }).start();
     }
     private void showIndustryPickerDialogThenStart(ScreenerMode mode, String[] industries) {
-        if (industries == null) industries = new String[0];
+        final ScreenerMode modeFinal = mode;
+        final String[] industriesFinal = (industries == null) ? new String[0] : industries;
 
         java.util.ArrayList<String> list = new java.util.ArrayList<>();
-        for (String s : industries) {
+        for (String s : industriesFinal) {
             if (s == null) continue;
             String ind = s.trim();
             if (ind.isEmpty()) continue;
@@ -2343,6 +2355,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                     setControlsEnabled(true);
                     startScreening(mode);
                 })
+                .setNeutralButton(R.string.screener_pick_from_file, null) // ✅ 新增
                 .setNegativeButton(android.R.string.cancel, (d, w) -> {
                     if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
                     setControlsEnabled(true);
@@ -2350,7 +2363,31 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 .create();
 
         dlg.show();
+        android.widget.Button btnFromFile = dlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL);
+        btnFromFile.setOnClickListener(v -> {
+            dlg.dismiss();
 
+            openCsvFilePickerForScreening(file -> {
+                java.util.List<String> tickers = readFirstColumnTickersFromCsv(file);
+                if (tickers == null || tickers.isEmpty()) {
+                    Toast.makeText(this, getString(R.string.error_csv_no_tickers, file.getName()), Toast.LENGTH_LONG).show();
+                    // 回到產業選單
+                    showIndustryPickerDialogThenStart(modeFinal, industriesFinal);
+                    return;
+                }
+
+                // ✅ 記住這次要用檔案做篩選
+                pendingTickerCsvPathForScreening = file.getAbsolutePath();
+
+                if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
+                setControlsEnabled(true);
+                startScreening(mode);
+
+            }, () -> {
+                // 取消選檔：回到產業選單
+                showIndustryPickerDialogThenStart(modeFinal, industriesFinal);
+            });
+        });
         android.widget.ListView lv = dlg.getListView();
 
         // 「全選」勾選邏輯：勾上 => 全選；取消 => 全不選
@@ -2371,6 +2408,58 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 }
             }
         });
+    }
+    private void openCsvFilePickerForScreening(java.util.function.Consumer<java.io.File> onPicked,
+                                               Runnable onCancel) {
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null || !dir.exists()) {
+            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            if (onCancel != null) onCancel.run();
+            return;
+        }
+
+        java.io.File[] files = dir.listFiles((d, name) ->
+                name != null && name.toLowerCase(java.util.Locale.US).endsWith(".csv"));
+
+        if (files == null || files.length == 0) {
+            Toast.makeText(this, getString(R.string.error_csv_not_found, dir.getAbsolutePath()), Toast.LENGTH_LONG).show();
+            if (onCancel != null) onCancel.run();
+            return;
+        }
+
+        java.util.Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+
+        android.widget.ListView lv = new android.widget.ListView(this);
+        java.util.ArrayList<java.io.File> fileList = new java.util.ArrayList<>();
+        for (java.io.File f : files) fileList.add(f);
+
+        android.widget.ArrayAdapter<java.io.File> adapter =
+                new android.widget.ArrayAdapter<java.io.File>(this, android.R.layout.simple_list_item_1, fileList) {
+                    @Override public android.view.View getView(int position, android.view.View convertView, android.view.ViewGroup parent) {
+                        android.view.View v = super.getView(position, convertView, parent);
+                        android.widget.TextView tv = v.findViewById(android.R.id.text1);
+                        java.io.File f = getItem(position);
+                        tv.setText(f != null ? f.getName() : "");
+                        return v;
+                    }
+                };
+        lv.setAdapter(adapter);
+
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.screener_pick_csv_title)
+                .setView(lv)
+                .setNegativeButton(android.R.string.cancel, (d, w) -> {
+                    if (onCancel != null) onCancel.run();
+                })
+                .create();
+
+        lv.setOnItemClickListener((p, v, which, id) -> {
+            java.io.File f = fileList.get(which);
+            dlg.dismiss();
+            if (onPicked != null) onPicked.accept(f);
+        });
+
+        dlg.show();
     }
     private void showFilteredAt(int idx, boolean forceDownload) {
         if (screenerResults.isEmpty()) return;

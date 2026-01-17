@@ -55,6 +55,7 @@ public class ScreenerForegroundService extends Service {
     private static final int NOTIF_ID = 1001;
     public static final String EXTRA_KD_GC_BARS = "kd_gc_bars";
     public static final String EXTRA_KD_GC_TF   = "kd_gc_tf";
+    public static final String EXTRA_TICKER_CSV_PATH = "ticker_csv_path";
 
     private final ExecutorService exec = Executors.newSingleThreadExecutor();
     private Future<?> job;
@@ -121,13 +122,14 @@ public class ScreenerForegroundService extends Service {
             ov.kdGcBars = getIntOrNull(intent, EXTRA_KD_GC_BARS);
             ov.kdGcTf   = getTrimmedStringOrNull(intent, EXTRA_KD_GC_TF);
 
-            Log.d("ScreenerSvc", "mode=" + mode
-                    + " ov.ltThr=" + ov.ltThr + " ov.ltDays=" + ov.ltDays
-                    + " ov.gtThr=" + ov.gtThr + " ov.gtMin=" + ov.gtMin + " ov.gtMax=" + ov.gtMax
-                    + " ov.maBandPct=" + ov.maBandPct + " ov.maDays=" + ov.maDays
-                    + " ov.macdDivBars=" + ov.macdDivBars + " ov.macdDivTf=" + ov.macdDivTf + " ov.macdDivSide=" + ov.macdDivSide);
+            //Log.d("ScreenerSvc", "mode=" + mode
+            //        + " ov.ltThr=" + ov.ltThr + " ov.ltDays=" + ov.ltDays
+            //        + " ov.gtThr=" + ov.gtThr + " ov.gtMin=" + ov.gtMin + " ov.gtMax=" + ov.gtMax
+            //        + " ov.maBandPct=" + ov.maBandPct + " ov.maDays=" + ov.maDays
+            //        + " ov.macdDivBars=" + ov.macdDivBars + " ov.macdDivTf=" + ov.macdDivTf + " ov.macdDivSide=" + ov.macdDivSide);
 
-            job = exec.submit(() -> runScreening(mode, industries, ov));
+            final String tickerCsvPath = intent.getStringExtra(EXTRA_TICKER_CSV_PATH);
+            job = exec.submit(() -> runScreening(mode, industries, ov, tickerCsvPath));
             return START_STICKY;
         }
 
@@ -172,7 +174,10 @@ public class ScreenerForegroundService extends Service {
         }
     }
 
-    private void runScreening(ScreenerMode mode, java.util.HashSet<String> industries, ScreenerEngine.Overrides ov) {
+    private void runScreening(ScreenerMode mode,
+                              java.util.HashSet<String> industries,
+                              ScreenerEngine.Overrides ov,
+                              @Nullable String tickerCsvPath) {
         try {
             YahooFinanceFetcher fetcher = new YahooFinanceFetcher();
 
@@ -184,7 +189,34 @@ public class ScreenerForegroundService extends Service {
                 stopSelfSafely();
                 return;
             }
+            // ✅ 檔案過濾：若有指定 tickerCsvPath，就只篩檔案內的 tickers
+            if (tickerCsvPath != null && !tickerCsvPath.trim().isEmpty()) {
+                java.io.File f = new java.io.File(tickerCsvPath);
+                java.util.HashSet<String> allow = readTickerSetFromCsv(f);
 
+                if (allow.isEmpty()) {
+                    sendFail("No tickers in file");
+                    stopSelfSafely();
+                    return;
+                }
+
+                java.util.ArrayList<TickerInfo> filtered = new java.util.ArrayList<>();
+                for (TickerInfo ti : tickers) {
+                    if (ti == null || ti.ticker == null) continue;
+                    String tk = ti.ticker.trim().toUpperCase(java.util.Locale.US);
+                    if (allow.contains(tk)) filtered.add(ti);
+                }
+                tickers = filtered;
+
+                if (tickers.isEmpty()) {
+                    sendFail("No tickers after file filter");
+                    stopSelfSafely();
+                    return;
+                }
+
+                // 檔案模式：不再做產業過濾（避免混合條件造成困惑）
+                industries = null;
+            }
             // 產業過濾：用傳進來的 industries
             if (industries != null && !industries.isEmpty()) {
                 java.util.ArrayList<TickerInfo> filtered = new java.util.ArrayList<>();
@@ -230,6 +262,28 @@ public class ScreenerForegroundService extends Service {
         }
     }
 
+    private java.util.HashSet<String> readTickerSetFromCsv(java.io.File file) {
+        java.util.HashSet<String> out = new java.util.HashSet<>();
+        if (file == null || !file.exists()) return out;
+
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+
+                String col0 = line.split(",", -1)[0].trim();
+                if (col0.equalsIgnoreCase("ticker")) continue;
+
+                String t = col0.toUpperCase(java.util.Locale.US);
+                if (!t.isEmpty()) out.add(t);
+            }
+        } catch (Exception ignored) {}
+
+        return out;
+    }
     private void cancelJob() {
         cancelled.set(true);
         if (job != null) job.cancel(true);
