@@ -961,25 +961,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
-
-    private String lookupTickerName(String ticker) {
-        if (ticker == null) return "";
-        String key = ticker.trim().toUpperCase(java.util.Locale.US);
-        if (key.isEmpty()) return "";
-
-        if (tickerMetaMap != null) {
-            TickerInfo info = tickerMetaMap.get(key);
-            if (info == null) {
-                String base = key.replace(".TW", "").replace(".TWO", "");
-                info = tickerMetaMap.get(base);
-            }
-            if (info != null && info.name != null) {
-                return info.name.trim();
-            }
-        }
-        return "";
-    }
-    private void showFavoritesStockListDialog() {
+     private void showFavoritesStockListDialog() {
         if (favoriteMap == null || favoriteMap.isEmpty()) {
             Toast.makeText(this, getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT).show();
             return;
@@ -1760,24 +1742,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
     // ---------- helpers：放在 MainActivity 內任意位置（若你已經有同名可跳過） ----------
 
-    private String csv(String s) {
-        if (s == null) return "";
-        String v = s;
-        boolean needQuote = v.contains(",") || v.contains("\"") || v.contains("\n") || v.contains("\r");
-        if (!needQuote) return v;
-        return "\"" + v.replace("\"", "\"\"") + "\"";
-    }
-
-    private String numOrEmpty(double v) {
-        if (Double.isNaN(v) || Double.isInfinite(v)) return "";
-        return String.valueOf(v);
-    }
-
-    private String numOrEmpty(Double v) {
-        if (v == null) return "";
-        if (Double.isNaN(v) || Double.isInfinite(v)) return "";
-        return String.valueOf(v);
-    }
     @Override
     protected void onDestroy() {
         try {
@@ -4546,34 +4510,6 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         set.setAxisDependency(YAxis.AxisDependency.LEFT);
         set.setForm(Legend.LegendForm.NONE);
         data.addDataSet(set);
-    }
-
-    private boolean isLocalHigh(List<StockDayPrice> list, int i) {
-        if (i < 2 || i > list.size() - 3) return false;
-        double v = list.get(i).getHigh();
-        return v > list.get(i - 1).getHigh() && v > list.get(i - 2).getHigh()
-                && v > list.get(i + 1).getHigh() && v > list.get(i + 2).getHigh();
-    }
-
-    private boolean isLocalLow(List<StockDayPrice> list, int i) {
-        if (i < 2 || i > list.size() - 3) return false;
-        double v = list.get(i).getLow();
-        return v < list.get(i - 1).getLow() && v < list.get(i - 2).getLow()
-                && v < list.get(i + 1).getLow() && v < list.get(i + 2).getLow();
-    }
-
-    private int findPreviousLocalHigh(List<StockDayPrice> list, int currentIdx) {
-        for (int j = currentIdx - 5; j > Math.max(0, currentIdx - 35); j--) {
-            if (isLocalHigh(list, j)) return j;
-        }
-        return -1;
-    }
-
-    private int findPreviousLocalLow(List<StockDayPrice> list, int currentIdx) {
-        for (int j = currentIdx - 5; j > Math.max(0, currentIdx - 35); j--) {
-            if (isLocalLow(list, j)) return j;
-        }
-        return -1;
     }
 
     private CombinedData drawMacdChartsRaw(List<StockDayPrice> displayedList) {
