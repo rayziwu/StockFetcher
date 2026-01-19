@@ -4494,6 +4494,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         String goldColor = "#FFD700";
         String cyanColor = "#00FFFF";
         float smallSize = 17.5f;
+        float largeSize = 35f;
 
         // Candle (K線)
         if (showCandle) {
@@ -4514,7 +4515,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 int d60Idx = displayedList.size() - 60;
                 List<Entry> d60Entries = new ArrayList<>();
                 d60Entries.add(new Entry(d60Idx, (float) displayedList.get(d60Idx).getHigh()));
-                addScatterDataSet(scatterData, d60Entries, goldColor, 3, smallSize);
+                addScatterDataSet(scatterData, d60Entries, goldColor, 3, largeSize);
             }
 
             List<Entry> difUp = new ArrayList<>(), difDown = new ArrayList<>();
@@ -5356,7 +5357,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             float r = shapeSize / 2f;
 
             renderPaint.setStyle(Paint.Style.STROKE);
-            renderPaint.setStrokeWidth(Math.max(2f, shapeSize * 0.12f));
+            renderPaint.setStrokeWidth(Math.max(4f, shapeSize * 0.12f));
             renderPaint.setColor(dataSet.getColor());
 
             canvas.drawLine(x - r, y, x + r, y, renderPaint);
