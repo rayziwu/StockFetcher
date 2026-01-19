@@ -21,6 +21,10 @@ public final class ScreenerEngine {
         public Integer maBandPct;  // ±% (e.g. 3 means 3%)
         public Integer maDays;     // last N days
 
+        public String maTf;
+
+        public Integer maWindow;
+
         // ✅ [ADD] MACD divergence recent
         public Integer macdDivBars;   // recent N bars, default 2
         public String  macdDivTf;     // timeframe: "HOUR/DAY/WEEK/MONTH" (or "時/日/周/月", or "1h/1d/1wk/1mo")
@@ -129,10 +133,13 @@ public final class ScreenerEngine {
         ModeConfig cfg = ModeConfig.forMode(mode);
 
         String interval = cfg.interval;
+
         if (mode == ScreenerMode.MACD_DIV_RECENT) {
             interval = resolveMacdDivInterval(ov);
         } else if (mode == ScreenerMode.KD_GC_RECENT) {
             interval = resolveKdGcInterval(ov);
+        } else if (mode == ScreenerMode.MA60_3PCT) {
+            interval = resolveMaBandInterval(ov);   // ✅ 新增
         }
 
         long startTime = getScreenerStartTimeSeconds(interval);
@@ -157,6 +164,9 @@ public final class ScreenerEngine {
                 : cfg.band;
         final int maDays = (ov != null && ov.maDays != null) ? clampI(ov.maDays, 1, 400) : cfg.persistDays;
 
+        final int maWindow = (ov != null && ov.maWindow != null)
+                ? clampI(ov.maWindow, 1, 400)
+                : cfg.maWindow; // fallback（你 cfg 原本是 60 或其它）
         final int kdGcBars = (ov != null && ov.kdGcBars != null) ? clampI(ov.kdGcBars, 1, 99) : 2;
 
         final int gtMin2 = Math.min(gtMin, gtMax);
@@ -198,7 +208,7 @@ public final class ScreenerEngine {
             }
             // MA60 band
             if (cfg.needMaBand) {
-                ScreenerResult r = evalMaBand(info, data, cfg.maWindow, maBand, maDays);
+                ScreenerResult r = evalMaBand(info, data, maWindow, maBand, maDays);
                 if (r != null) out.add(r);
                 continue;
             }
@@ -222,6 +232,24 @@ public final class ScreenerEngine {
 
         out.sort(Comparator.comparingDouble((ScreenerResult r) -> r.avgClose60).reversed());
         return out;
+    }
+    private static String resolveMaBandInterval(Overrides ov) {
+        if (ov == null || ov.maTf == null) return "1d";
+        String tf = ov.maTf.trim();
+
+        if ("時".equals(tf)) return "1h";
+        if ("日".equals(tf)) return "1d";
+        if ("周".equals(tf)) return "1wk";
+        if ("月".equals(tf)) return "1mo";
+
+        String up = tf.toUpperCase(java.util.Locale.ROOT);
+        if ("HOUR".equals(up))  return "1h";
+        if ("DAY".equals(up))   return "1d";
+        if ("WEEK".equals(up))  return "1wk";
+        if ("MONTH".equals(up)) return "1mo";
+
+        if ("1h".equals(tf) || "1d".equals(tf) || "1wk".equals(tf) || "1mo".equals(tf)) return tf;
+        return "1d";
     }
     private static boolean isFinite(double v) {
         return !Double.isNaN(v) && !Double.isInfinite(v);

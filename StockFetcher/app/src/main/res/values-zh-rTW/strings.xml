@@ -40,7 +40,7 @@
     <string name="btn_select_none">全不選</string>
     <string name="screener_mode_lt20">1. KD40 &lt; __ 連續__天 ,量放大</string>
     <string name="screener_mode_gt45">2. KD40 &gt;__ 連續__~__天</string>
-    <string name="screener_mode_ma60_3pct" formatted="false">3. 相較於     MA60 &lt;±__% 連續 __ 日</string>
+    <string name="screener_mode_ma60_3pct" formatted="false">3. 相較於     MA &lt;±__% 連續 __ 日</string>
     <string name="screener_mode_kd_gc_recent">5. KD黃金交叉（近N根XK）</string>
     <string name="screener_mode_csv_list">讀取股票清單檔案</string>
 
@@ -81,7 +81,7 @@
     <string name="nodata_no_history">無 %1$s 歷史數據可供繪製。</string>
     <string name="screener_params_lt20">KD40 &lt; %1$d 連續%2$d天, 量放大</string>
     <string name="screener_params_gt45">KD40 &gt; %1$d 連續%2$d~%3$d天, 量放大</string>
-    <string name="screener_params_ma60">相較於 MA60 &lt;±%1$d%% 連續%2$d日</string>
+    <string name="screener_params_ma60">相較於 MA &lt;±%1$d%% 連續%2$d日</string>
     <string name="screener_params_macd_div_recent">最近%1$d根%2$sK柱，%3$s部背離</string>
     <string name="screener_params_kd_gc_recent">最近%1$d根%2$sK柱，KD黃金交叉</string>
     <string name="dialog_screener_done_msg_with_params">%1$s\n%2$s\n筆數：%3$d</string>

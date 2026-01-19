@@ -40,7 +40,7 @@
     <string name="btn_select_none">Select none</string>
     <string name="screener_mode_lt20">1. KD40 &lt; __   for __ days</string>
     <string name="screener_mode_gt45">2. KD40 &gt;__   for __~__ days</string>
-    <string name="screener_mode_ma60_3pct" formatted="false">3. Differs MA60 &lt;±__% for__ days</string>
+    <string name="screener_mode_ma60_3pct" formatted="false">3. Differs MA &lt;±__% for__ days</string>
     <string name="screener_mode_kd_gc_recent">5. KD golden cross (recent bars)</string>
     <string name="screener_mode_csv_list">Load a stock list from file</string>
 
@@ -81,7 +81,7 @@
     <string name="nodata_no_history">No historical data for %1$s.</string>
     <string name="screener_params_lt20">KD40 &lt; %1$d for %2$d days, volume spike</string>
     <string name="screener_params_gt45">KD40 &gt; %1$d for %2$d~%3$d days, volume spike</string>
-    <string name="screener_params_ma60">Deviates MA60 &lt;±%1$d%% for %2$d days</string>
+    <string name="screener_params_ma60">Deviates MA &lt;±%1$d%% for %2$d days</string>
     <string name="screener_params_macd_div_recent">Last %1$d %2$s bars, %3$s divergence</string>
     <string name="screener_params_kd_gc_recent">Last %1$d %2$s bars, KD golden cross</string>
 

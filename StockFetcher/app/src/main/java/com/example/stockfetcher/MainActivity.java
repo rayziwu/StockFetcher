@@ -151,6 +151,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private int pMaBandPct = 3;
     private int pMaDays = 20;
 
+    private String pMaTf = "日";   // Row3 預設週期
+    private int pMaPick = 1;       // 0=MA1, 1=MA2（預設 MA2）
+
+    private String activeMaTf = "日";
+    private int activeMaPick = 1;
+
     private TextView indicatorModeLabel;
     private List<StockDayPrice> lastDisplayedListForIndicator = null;
     enum KkdViewMode { KD, VOL, COMP }
@@ -1244,6 +1250,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             case LT20:
             case GT45:
             case MA60_3PCT:
+                target = mapTfToInterval(activeMaTf);
+                break;
             default:
                 target = "1d";
                 break;
@@ -1762,6 +1770,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         activeGtMin = pGtMin;
         activeGtMax = pGtMax;
 
+        activeMaTf = pMaTf;
+        activeMaPick = pMaPick;
         activeMaBandPct = pMaBandPct;
         activeMaDays = pMaDays;
 
@@ -1790,6 +1800,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         it.putExtra(ScreenerForegroundService.EXTRA_GT_MIN, activeGtMin);
         it.putExtra(ScreenerForegroundService.EXTRA_GT_MAX, activeGtMax);
 
+        it.putExtra(ScreenerForegroundService.EXTRA_MA_TF, activeMaTf);
+        it.putExtra(ScreenerForegroundService.EXTRA_MA_WINDOW,
+                resolveMaWindowByTfAndPick(activeMaTf, activeMaPick));
         it.putExtra(ScreenerForegroundService.EXTRA_MA_BAND_PCT, activeMaBandPct);
         it.putExtra(ScreenerForegroundService.EXTRA_MA_DAYS, activeMaDays);
         it.putStringArrayListExtra(ScreenerForegroundService.EXTRA_INDUSTRIES,
@@ -2030,21 +2043,64 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row2.addView(mkText.apply(isZh ? "天" : "days"));
         row2.setClickable(true);
 
-        // ---------- Row 3: MA60 band ----------
+        // ---------- Row 3: MA band (tf + MA1/MA2 with NumberPicker) ----------
         final android.widget.EditText etMaBand = mk2d.apply(pMaBandPct);
         final android.widget.EditText etMaDays = mk2d.apply(pMaDays);
+
+        final android.widget.NumberPicker npMaTf = mkTfPicker.apply(pMaTf);
+
+// ✅ MA1/MA2 改成 NumberPicker（同 tf 類型）
+        final android.widget.NumberPicker npMaPick = new android.widget.NumberPicker(this);
+        npMaPick.setWrapSelectorWheel(true);
+        npMaPick.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+
+// 外觀尺寸（跟你的 tf picker 一樣高度）
+        android.widget.LinearLayout.LayoutParams lpMaPick =
+                new android.widget.LinearLayout.LayoutParams(dp72, dp60);
+        lpMaPick.leftMargin = dp2;
+        lpMaPick.rightMargin = dp2;
+        npMaPick.setLayoutParams(lpMaPick);
+        npMaPick.setMinimumWidth(dp72);
+
+// ✅ 先依目前 pMaTf 更新成 MAxx / MAyy，並套用 pMaPick(0/1)
+        updateMaPickNumberPicker(npMaPick, pMaTf, pMaPick);
+
+// ✅ tf 改變時，同步更新 MA picker 的顯示值（MA1/MA2 的數字會隨週期變）
+        npMaTf.setOnValueChangedListener((picker, oldVal, newVal) -> {
+            String tf = tfItems[newVal];           // newVal -> "時/日/周/月"
+            int sel = npMaPick.getValue();         // 保留目前選的是 MA1(0) 還 MA2(1)
+            updateMaPickNumberPicker(npMaPick, tf, sel);
+        });
 
         android.widget.LinearLayout row3 = new android.widget.LinearLayout(this);
         row3.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         row3.setPadding(0, dp2, 0, dp2);
         row3.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        row3.addView(mkText.apply(isZh ? "相較MA60 <" : "Differs MA60 <"));
+
+// 你目前的顯示：tfPicker + MAxxPicker + "<"
+        row3.addView(npMaTf);
+        row3.addView(npMaPick);
+        row3.addView(mkText.apply("±" +
+                ""));
+
         row3.addView(etMaBand);
         row3.addView(mkText.apply("%"));
         row3.addView(mkText.apply(isZh ? " 連續" : " for"));
         row3.addView(etMaDays);
         row3.addView(mkText.apply(isZh ? "天" : "days"));
         row3.setClickable(true);
+
+// ✅ 點 row3 時存參數（你原本 row3 click listener 要記得改用 npMaPick.getValue()）
+// row3.setOnClickListener(v -> {
+//     Integer band = readInt.apply(etMaBand);
+//     Integer days = readInt.apply(etMaDays);
+//     pMaBandPct = clampInt(band != null ? band : 3, 0, 99);
+//     pMaDays    = clampInt(days != null ? days : 20, 1, 99);
+//     pMaTf = tfItems[npMaTf.getValue()];
+//     pMaPick = npMaPick.getValue(); // 0=MA1, 1=MA2
+//     dlg.dismiss();
+//     ensureTickerFileThenStart(ScreenerMode.MA60_3PCT);
+// });
 
 // ---------- Row 4: MACD divergence (one line) ----------
         final android.widget.EditText etMacdBars = mk2d.apply(pMacdDivBars);
@@ -2151,8 +2207,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row3.setOnClickListener(v -> {
             Integer band = readInt.apply(etMaBand);
             Integer days = readInt.apply(etMaDays);
+
             pMaBandPct = clampInt(band != null ? band : 3, 0, 99);
             pMaDays    = clampInt(days != null ? days : 20, 1, 99);
+
+            pMaTf = tfItems[npMaTf.getValue()];
+            pMaPick = npMaPick.getValue(); // ✅ 改這行（0=MA1, 1=MA2）
+
             dlg.dismiss();
             ensureTickerFileThenStart(ScreenerMode.MA60_3PCT);
         });
@@ -2184,6 +2245,43 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         });
 
         dlg.show();
+    }
+
+    private int[] getMa1Ma2PeriodsByInterval(String interval) {
+        // 必須跟 calculateMovingAverages() 完全一致
+        switch (interval) {
+            case "1h":
+            case "1wk":
+                return new int[]{35, 200};
+            case "1mo":
+                return new int[]{60, 120};
+            case "1d":
+            default:
+                return new int[]{60, 240};
+        }
+    }
+
+    private void updateMaPickNumberPicker(android.widget.NumberPicker np, String tf, int selectedIndex) {
+        if (np == null) return;
+
+        String interval = mapTfToInterval(tf); // 你現有的 mapTfToInterval()
+        int[] p = getMa1Ma2PeriodsByInterval(interval);
+        String[] labels = new String[]{"MA" + p[0], "MA" + p[1]};
+
+        // NumberPicker 更新 displayed values 的正確順序（避免 IllegalArgumentException）
+        np.setDisplayedValues(null);
+        np.setMinValue(0);
+        np.setMaxValue(labels.length - 1);
+        np.setDisplayedValues(labels);
+
+        np.setValue(Math.max(0, Math.min(1, selectedIndex)));
+    }
+
+    // pick: 0=MA1, 1=MA2
+    private int resolveMaWindowByTfAndPick(String tf, int pick) {
+        String interval = mapTfToInterval(tf); // 你已經有 mapTfToInterval()
+        int[] p = getMa1Ma2PeriodsByInterval(interval);
+        return (pick == 0) ? p[0] : p[1];
     }
     private void ensureTickerFileThenStart(ScreenerMode mode) {
         java.io.File f = TwTickerRepository.getCacheFile(this); // 你前面已加

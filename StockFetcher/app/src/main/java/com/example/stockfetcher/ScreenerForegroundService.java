@@ -50,7 +50,8 @@ public class ScreenerForegroundService extends Service {
     public static final String EXTRA_MACD_DIV_BARS = "macd_div_bars";   // int
     public static final String EXTRA_MACD_DIV_TF   = "macd_div_tf";     // String: "時/日/周/月" or "HOUR/DAY/WEEK/MONTH"
     public static final String EXTRA_MACD_DIV_SIDE = "macd_div_side";   // String: "底/頂" or "BOTTOM/TOP"
-
+    public static final String EXTRA_MA_TF = "ma_tf";
+    public static final String EXTRA_MA_WINDOW = "ma_window";
     private static final String CH_ID = "screener_channel";
     private static final int NOTIF_ID = 1001;
     public static final String EXTRA_KD_GC_BARS = "kd_gc_bars";
@@ -112,8 +113,11 @@ public class ScreenerForegroundService extends Service {
             ov.gtMin = getIntOrNull(intent, EXTRA_GT_MIN);
             ov.gtMax = getIntOrNull(intent, EXTRA_GT_MAX);
 
+
             ov.maBandPct = getIntOrNull(intent, EXTRA_MA_BAND_PCT);
             ov.maDays = getIntOrNull(intent, EXTRA_MA_DAYS);
+            ov.maTf = getTrimmedStringOrNull(intent, EXTRA_MA_TF);
+            ov.maWindow = getIntOrNull(intent, EXTRA_MA_WINDOW);
 
             // ✅ [ADD] MACD divergence overrides
             ov.macdDivBars = getIntOrNull(intent, EXTRA_MACD_DIV_BARS);
@@ -387,7 +391,7 @@ public class ScreenerForegroundService extends Service {
             switch (mode) {
                 case LT20: tag = "LT20"; break;
                 case GT45: tag = "GT45"; break;
-                case MA60_3PCT: tag = "MA60_3%"; break;
+                case MA60_3PCT: tag = "MA±%"; break;
                 case MACD_DIV_RECENT: tag = "MACD_DIV"; break;
                 case KD_GC_RECENT: tag = "KD_GC"; break;   // ✅ 新增
                 default: tag = "MODE"; break;
