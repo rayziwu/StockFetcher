@@ -346,7 +346,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         if (carouselActive) return;
 
         if (favoriteMap == null || favoriteMap.isEmpty()) {
-            Toast.makeText(this, getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT).show();
+            showToastTop( getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT);
             return;
         }
 
@@ -371,7 +371,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
 
         if (screenerResults.isEmpty()) {
-            Toast.makeText(this, getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT).show();
+            showToastTop( getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT);
             return;
         }
 
@@ -941,7 +941,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         }
 
-        Toast.makeText(this, getString(R.string.toast_carousel_list_empty), Toast.LENGTH_SHORT).show();
+        showToastTop( getString(R.string.toast_carousel_list_empty), Toast.LENGTH_SHORT);
     }
 
     private void showCarouselTickerPickerFromTickers(java.util.List<String> tickers) {
@@ -976,7 +976,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
      private void showFavoritesStockListDialog() {
         if (favoriteMap == null || favoriteMap.isEmpty()) {
-            Toast.makeText(this, getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT).show();
+            showToastTop( getString(R.string.toast_favorites_empty), Toast.LENGTH_SHORT);
             return;
         }
 
@@ -1176,7 +1176,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             screenerButton.setOnClickListener(v -> {
                 if (isScreening) {
                     // 點擊時提示（或你也可改成直接取消）
-                    Toast.makeText(this, getString(R.string.toast_screener_running), Toast.LENGTH_SHORT).show();
+                    showToastTop( getString(R.string.toast_screener_running), Toast.LENGTH_SHORT);
                 } else {
                     showScreenerModeDialog();
                 }
@@ -1374,7 +1374,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void openCsvListPicker() {
         java.io.File dir = getExternalFilesDir(null);
         if (dir == null || !dir.exists()) {
-            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            showToastTop(getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG);
             return;
         }
 
@@ -1382,7 +1382,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 name != null && name.toLowerCase(java.util.Locale.US).endsWith(".csv"));
 
         if (files == null || files.length == 0) {
-            Toast.makeText(this, getString(R.string.error_csv_not_found, dir.getAbsolutePath()), Toast.LENGTH_LONG).show();
+            showToastTop(getString(R.string.error_csv_not_found, dir.getAbsolutePath()), Toast.LENGTH_LONG);
             return;
         }
 
@@ -1425,7 +1425,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         List<String> tickers = readFirstColumnTickersFromCsv(f);
         if (tickers.isEmpty()) {
-            Toast.makeText(this, getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG).show();
+            showToastTop(getString(R.string.error_csv_no_tickers, f.getName()), Toast.LENGTH_LONG);
             return;
         }
 
@@ -1482,9 +1482,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         updateTopOutsideMainChartUi();
 
         // 可選：提示使用者目前最愛清單來源已切換
-        //Toast.makeText(this,
+        // showToastTop(
         //        getString(R.string.toast_favorites_switched, f.getName()),
-        //        Toast.LENGTH_SHORT).show();
+        //        Toast.LENGTH_SHORT);
     }
     private void showCsvLongPressMenu(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File targetFile) {
         if (targetFile == null) return;
@@ -1509,7 +1509,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void showCopyCsvDialog(androidx.appcompat.app.AlertDialog pickerDlg, java.io.File src) {
         java.io.File dir = src.getParentFile();
         if (dir == null) {
-            Toast.makeText(this, getString(R.string.error_csv_copy_failed), Toast.LENGTH_LONG).show();
+            showToastTop(getString(R.string.error_csv_copy_failed), Toast.LENGTH_LONG);
             return;
         }
 
@@ -1536,23 +1536,23 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             String fileName = sanitizeCsvFileName(input);
 
             if (fileName == null) {
-                Toast.makeText(this, getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG).show();
+                showToastTop(getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG);
                 return; // 不 dismiss
             }
 
             java.io.File dst = new java.io.File(dir, fileName);
             if (dst.exists()) {
-                Toast.makeText(this, getString(R.string.error_csv_name_exists, dst.getName()), Toast.LENGTH_LONG).show();
+                showToastTop(getString(R.string.error_csv_name_exists, dst.getName()), Toast.LENGTH_LONG);
                 return; // 不 dismiss
             }
 
             boolean okCopy = copyFile(src, dst);
             if (!okCopy) {
-                Toast.makeText(this, getString(R.string.error_csv_copy_failed), Toast.LENGTH_LONG).show();
+                showToastTop(getString(R.string.error_csv_copy_failed), Toast.LENGTH_LONG);
                 return;
             }
 
-            Toast.makeText(this, getString(R.string.toast_csv_copied, dst.getName()), Toast.LENGTH_SHORT).show();
+            showToastTop(getString(R.string.toast_csv_copied, dst.getName()), Toast.LENGTH_SHORT);
 
             dlg.dismiss();
             if (pickerDlg != null) pickerDlg.dismiss();
@@ -1679,11 +1679,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                     }
 
                     if (!ok) {
-                        Toast.makeText(this, getString(R.string.error_csv_delete_failed, target.getName()), Toast.LENGTH_LONG).show();
+                        showToastTop(getString(R.string.error_csv_delete_failed, target.getName()), Toast.LENGTH_LONG);
                         return;
                     }
 
-                    Toast.makeText(this, getString(R.string.toast_csv_deleted, target.getName()), Toast.LENGTH_SHORT).show();
+                    showToastTop(getString(R.string.toast_csv_deleted, target.getName()), Toast.LENGTH_SHORT);
 
                     if (pickerDlg != null) pickerDlg.dismiss();
                     openCsvListPicker(); // 方案B：重新開
@@ -2385,7 +2385,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                     // 還原 UI
                     if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
                     setControlsEnabled(true);
-                    Toast.makeText(MainActivity.this, reasonFinal, Toast.LENGTH_LONG).show();
+                    showToastTop(reasonFinal, Toast.LENGTH_LONG);
                 });
                 return;
             }
@@ -2503,7 +2503,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             openCsvFilePickerForScreening(file -> {
                 java.util.List<String> tickers = readFirstColumnTickersFromCsv(file);
                 if (tickers == null || tickers.isEmpty()) {
-                    Toast.makeText(this, getString(R.string.error_csv_no_tickers, file.getName()), Toast.LENGTH_LONG).show();
+                    showToastTop(getString(R.string.error_csv_no_tickers, file.getName()), Toast.LENGTH_LONG);
                     // 回到產業選單
                     showIndustryPickerDialogThenStart(modeFinal, industriesFinal);
                     return;
@@ -2546,7 +2546,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                                                Runnable onCancel) {
         java.io.File dir = getExternalFilesDir(null);
         if (dir == null || !dir.exists()) {
-            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            showToastTop(getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG);
             if (onCancel != null) onCancel.run();
             return;
         }
@@ -2555,7 +2555,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 name != null && name.toLowerCase(java.util.Locale.US).endsWith(".csv"));
 
         if (files == null || files.length == 0) {
-            Toast.makeText(this, getString(R.string.error_csv_not_found, dir.getAbsolutePath()), Toast.LENGTH_LONG).show();
+            showToastTop(getString(R.string.error_csv_not_found, dir.getAbsolutePath()), Toast.LENGTH_LONG);
             if (onCancel != null) onCancel.run();
             return;
         }
@@ -2837,7 +2837,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                         if (screenerButton != null) screenerButton.setText(getString(R.string.screener_btn));
 
                         String err = intent.getStringExtra(ScreenerForegroundService.EXTRA_ERROR);
-                        Toast.makeText(MainActivity.this, err == null ? "Failed" : err, Toast.LENGTH_LONG).show();
+                        showToastTop(err == null ? "Failed" : err, Toast.LENGTH_LONG);
                         return;
                     }
 
@@ -2867,9 +2867,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                             if (tmpFile != null) {
                                 try { tmpFile.delete(); } catch (Exception ignored) {}
                             }
-                            Toast.makeText(MainActivity.this,
+                            showToastTop(
                                     getString(R.string.toast_screener_none, getScreenerModeLabel(screenerMode)),
-                                    Toast.LENGTH_LONG).show();
+                                    Toast.LENGTH_LONG);
                             return;
                         }
 
@@ -2971,7 +2971,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             String input = (et.getText() == null) ? "" : et.getText().toString().trim();
             String fileName = sanitizeCsvFileName(input);
             if (fileName == null) {
-                Toast.makeText(this, getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG).show();
+                showToastTop(getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG);
                 return;
             }
 
@@ -2981,7 +2981,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             boolean sameFile = outFile.getAbsolutePath().equals(tmpFile.getAbsolutePath());
 
             if (!sameFile && outFile.exists()) {
-                Toast.makeText(this, getString(R.string.error_csv_name_exists, outFile.getName()), Toast.LENGTH_LONG).show();
+                showToastTop(getString(R.string.error_csv_name_exists, outFile.getName()), Toast.LENGTH_LONG);
                 return;
             }
 
@@ -2997,18 +2997,18 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
 
             if (!ok) {
-                Toast.makeText(this, getString(R.string.error_csv_save_failed), Toast.LENGTH_LONG).show();
+                showToastTop(getString(R.string.error_csv_save_failed), Toast.LENGTH_LONG);
                 return;
             }
 
-            Toast.makeText(this, getString(R.string.toast_csv_saved, finalFile.getName()), Toast.LENGTH_SHORT).show();
+            showToastTop(getString(R.string.toast_csv_saved, finalFile.getName()), Toast.LENGTH_SHORT);
 
             // ✅ 檔名開頭「最愛」：用此檔案內容取代最愛清單，且後續 ♥/♡ 寫入同一檔
             if (isFavoritesCsvFileName(finalFile.getName())) {
                 setActiveFavoritesFileAndReload(finalFile); // 這個方法必須會 activeFavoritesFile = finalFile
-                Toast.makeText(this,
+                showToastTop(
                         getString(R.string.toast_favorites_replaced, finalFile.getName()),
-                        Toast.LENGTH_SHORT).show();
+                        Toast.LENGTH_SHORT);
             }
 
             activeCarouselFile = finalFile;
@@ -3031,7 +3031,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
            // screenerCancelled.set(true);
             cancelScreeningService();
 
-            Toast.makeText(this, getString(R.string.toast_screener_cancelled), Toast.LENGTH_SHORT).show();
+            showToastTop(getString(R.string.toast_screener_cancelled), Toast.LENGTH_SHORT);
             return;
         }
 
@@ -3043,14 +3043,14 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
             // ✅ 提示已存檔位置（若有）
             if (pendingExportCsv != null && !pendingExportCsv.trim().isEmpty()) {
-                Toast.makeText(this, "Saved: " + pendingExportCsv, Toast.LENGTH_LONG).show();
+                showToastTop("Saved: " + pendingExportCsv, Toast.LENGTH_LONG);
             } else {
-                Toast.makeText(this, "Screening session ended", Toast.LENGTH_SHORT).show();
+                showToastTop( "Screening session ended", Toast.LENGTH_SHORT);
             }
         } else {
             // 已結束過就再提示一次（可省略）
             if (pendingExportCsv != null && !pendingExportCsv.trim().isEmpty()) {
-                Toast.makeText(this, "Saved: " + pendingExportCsv, Toast.LENGTH_LONG).show();
+                showToastTop("Saved: " + pendingExportCsv, Toast.LENGTH_LONG);
             }
         }
     }
@@ -3931,7 +3931,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         java.io.File dir = getExternalFilesDir(null);
         if (dir == null || !dir.exists()) {
-            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            showToastTop( getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG);
             return;
         }
 
@@ -3991,9 +3991,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         updateFavoriteButtonState();
         updateTopOutsideMainChartUi();
 
-        Toast.makeText(this,
+        showToastTop(
                 getString(R.string.toast_added_to_favorite_file, f.getName()),
-                Toast.LENGTH_SHORT).show();
+                Toast.LENGTH_SHORT);
     }
 
     private boolean addCurrentMainToFavoriteMapIfAbsent() {
@@ -4024,7 +4024,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void showCreateFavoriteFileDialog(androidx.appcompat.app.AlertDialog parentDlg) {
         java.io.File dir = getExternalFilesDir(null);
         if (dir == null || !dir.exists()) {
-            Toast.makeText(this, getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG).show();
+            showToastTop( getString(R.string.error_csv_dir_unavailable), Toast.LENGTH_LONG);
             return;
         }
 
@@ -4050,17 +4050,17 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             String input = (et.getText() == null) ? "" : et.getText().toString().trim();
             String name = sanitizeCsvFileName(input);
             if (name == null) {
-                Toast.makeText(this, getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG).show();
+                showToastTop( getString(R.string.error_csv_invalid_filename), Toast.LENGTH_LONG);
                 return;
             }
             if (!name.startsWith("最愛")) {
-                Toast.makeText(this, getString(R.string.error_favorite_filename_prefix), Toast.LENGTH_LONG).show();
+                showToastTop( getString(R.string.error_favorite_filename_prefix), Toast.LENGTH_LONG);
                 return;
             }
 
             java.io.File f = new java.io.File(dir, name);
             if (f.exists()) {
-                Toast.makeText(this, getString(R.string.error_csv_name_exists, f.getName()), Toast.LENGTH_LONG).show();
+                showToastTop( getString(R.string.error_csv_name_exists, f.getName()), Toast.LENGTH_LONG);
                 return;
             }
 
@@ -4073,7 +4073,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 bw.flush();
             } catch (Exception e) {
                 android.util.Log.e(TAG, "create favorite file failed", e);
-                Toast.makeText(this, getString(R.string.error_csv_save_failed), Toast.LENGTH_LONG).show();
+                showToastTop( getString(R.string.error_csv_save_failed), Toast.LENGTH_LONG);
                 return;
             }
 
