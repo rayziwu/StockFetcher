@@ -17,6 +17,7 @@ import android.os.LocaleList;
 import android.text.InputFilter;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -117,7 +118,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private static final float CHART_OFFSET_BOTTOM = 20f;
     private static final float CHART_OFFSET_LEFT = 0f;
     private static final float CHART_OFFSET_RIGHT = 0f;
-
+    private static final int ID_HOUR  = 1001;
+    private static final int ID_DAY   = 1002;
+    private static final int ID_WEEK  = 1003;
+    private static final int ID_MONTH = 1004;
     private static final String GAP_LABEL_UP = "GAP_LABEL_UP";
     private static final String GAP_LABEL_DOWN = "GAP_LABEL_DOWN";
     private static final float GAP_LABEL_SHOW_SCALE = 1.02f;
@@ -1163,26 +1167,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         });
 
         // 週期切換
-        intervalSwitchButton.setOnClickListener(v -> {
-            isSwitchingInterval = true;
-            currentIntervalIndex = (currentIntervalIndex + 1) % INTERVALS.length;
-            currentInterval = INTERVALS[currentIntervalIndex];
-            intervalSwitchButton.setText(displayText[currentIntervalIndex]);
-
-            updateDateInputByInterval(currentInterval);
-
-            if (mainChart != null && mainChart.getData() != null) {
-                savedMainScaleX = mainChart.getViewPortHandler().getScaleX();
-                XAxis x = mainChart.getXAxis();
-                savedMainXRange = x.getAxisMaximum() - x.getAxisMinimum();
-                pendingRestoreCandleWidth = true;
-            }
-
-            comparisonPriceList.clear();
-            executeCustomDataFetch();
-
-            isSwitchingInterval = false;
-        });
+        // 週期切換（改為跳出選單：時 / 日 / 周 / 月）
+        intervalSwitchButton.setOnClickListener(v -> showIntervalMenu());
         updateDateInputByInterval(currentInterval);
         // Screener button
         if (screenerButton != null) {
@@ -1205,6 +1191,61 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         if (startDateEditText != null) {
             float px = startDateEditText.getTextSize(); // px
             startDateEditText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, px * 0.7f);
+        }
+    }
+    private void showIntervalMenu() {
+        androidx.appcompat.widget.PopupMenu popup =
+                new androidx.appcompat.widget.PopupMenu(this, intervalSwitchButton);
+
+        Menu menu = popup.getMenu();
+
+        // 顯示順序：時、日、周、月
+        menu.add(Menu.NONE, ID_HOUR,  0, getString(R.string.div_tf_hour));
+        menu.add(Menu.NONE, ID_DAY,   1, getString(R.string.div_tf_day));
+        menu.add(Menu.NONE, ID_WEEK,  2, getString(R.string.div_tf_week));
+        menu.add(Menu.NONE, ID_MONTH, 3, getString(R.string.div_tf_month));
+
+        popup.setOnMenuItemClickListener(item -> {
+            // 注意：你的 INTERVALS = {"1d", "1wk", "1mo", "1h"}
+            // 所以 mapping 必須是：時->3, 日->0, 周->1, 月->2
+            int newIndex;
+            int itemId = item.getItemId();
+
+            if (itemId == ID_HOUR)      newIndex = 3;
+            else if (itemId == ID_DAY)  newIndex = 0;
+            else if (itemId == ID_WEEK) newIndex = 1;
+            else if (itemId == ID_MONTH)newIndex = 2;
+            else return false;
+
+            // 點到同一個已選 interval：不要刷新資料
+            if (newIndex == currentIntervalIndex) return true;
+
+            applyInterval(newIndex);
+            return true;
+        });
+
+        popup.show();
+    }
+    private void applyInterval(int newIndex) {
+        isSwitchingInterval = true;
+        try {
+            currentIntervalIndex = newIndex;
+            currentInterval = INTERVALS[currentIntervalIndex];
+            intervalSwitchButton.setText(displayText[currentIntervalIndex]);
+
+            updateDateInputByInterval(currentInterval);
+
+            if (mainChart != null && mainChart.getData() != null) {
+                savedMainScaleX = mainChart.getViewPortHandler().getScaleX();
+                XAxis x = mainChart.getXAxis();
+                savedMainXRange = x.getAxisMaximum() - x.getAxisMinimum();
+                pendingRestoreCandleWidth = true;
+            }
+
+            comparisonPriceList.clear();
+            executeCustomDataFetch();
+        } finally {
+            isSwitchingInterval = false;
         }
     }
     private void setControlsEnabled(boolean enabled) {
@@ -3295,10 +3336,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                                          String interval, String comparisonSymbol) {
         final String baseSymbol = comparisonSymbol.toUpperCase(Locale.US).trim();
 
-        runOnUiThread(() -> showToastTop(
-                getString(R.string.toast_loading_comparison, mainSymbol, baseSymbol),
-                Toast.LENGTH_SHORT
-        ));
+        //runOnUiThread(() -> showToastTop(
+        //        getString(R.string.toast_loading_comparison, mainSymbol, baseSymbol),
+        //        Toast.LENGTH_SHORT));
 
         final long startTimeLimit = getStartTimeLimit(interval, isSwitchingInterval);
         comparisonPriceList.clear();
@@ -3349,9 +3389,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         Log.d(TAG, String.format(Locale.US, "開始請求主股 %s 和對比指數 %s，間隔 %s。",
                 mainSymbol, comparisonSymbol, interval));
 
-        showToastTop(
-                getString(R.string.toast_loading, mainSymbol, comparisonSymbol, displayText[currentIntervalIndex]),
-                Toast.LENGTH_SHORT);
+        //showToastTop(
+        //        getString(R.string.toast_loading, mainSymbol, comparisonSymbol, displayText[currentIntervalIndex]),
+        //        Toast.LENGTH_SHORT);
 
         final AtomicInteger fetchCount = new AtomicInteger(0);
         final List<String> errorMessages = Collections.synchronizedList(new ArrayList<>());
