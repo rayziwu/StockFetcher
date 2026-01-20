@@ -16,12 +16,15 @@ import android.os.Bundle;
 import android.os.LocaleList;
 import android.text.InputFilter;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -1233,6 +1236,33 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             default:
                 return ""; // 其他模式不顯示參數
         }
+    }
+    private void showToastTop(String msg, int duration) {
+        View root = findViewById(android.R.id.content);
+        if (root == null) return;
+
+        int len = (duration == Toast.LENGTH_LONG)
+                ? com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+                : com.google.android.material.snackbar.Snackbar.LENGTH_SHORT;
+
+        com.google.android.material.snackbar.Snackbar sb =
+                com.google.android.material.snackbar.Snackbar.make(root, msg, len);
+
+        View sbView = sb.getView();
+
+        // 把 Snackbar 放到上方（不遮住底部的 interval picker）
+        ViewGroup.LayoutParams lp0 = sbView.getLayoutParams();
+        if (lp0 instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) lp0;
+            lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+
+            int yOffset = Math.round(80f * getResources().getDisplayMetrics().density); // 80dp 可調
+            lp.topMargin = yOffset;
+
+            sbView.setLayoutParams(lp);
+        }
+
+        sb.show();
     }
     private void applyIntervalForScreener(ScreenerMode mode) {
         if (mode == null) return;
@@ -3236,9 +3266,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 Log.e(TAG, baseSymbol + " 載入失敗: " + errorMessage);
                 clearAllCharts(getString(R.string.error_load_failed, baseSymbol, errorMessage));
                 runOnUiThread(() ->
-                        Toast.makeText(MainActivity.this,
+                        showToastTop(
                                 getString(R.string.error_load_failed, baseSymbol, errorMessage),
-                                Toast.LENGTH_LONG).show()
+                                Toast.LENGTH_LONG)
                 );
             }
         });
@@ -3265,11 +3295,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                                          String interval, String comparisonSymbol) {
         final String baseSymbol = comparisonSymbol.toUpperCase(Locale.US).trim();
 
-        runOnUiThread(() -> Toast.makeText(
-                this,
+        runOnUiThread(() -> showToastTop(
                 getString(R.string.toast_loading_comparison, mainSymbol, baseSymbol),
                 Toast.LENGTH_SHORT
-        ).show());
+        ));
 
         final long startTimeLimit = getStartTimeLimit(interval, isSwitchingInterval);
         comparisonPriceList.clear();
@@ -3301,9 +3330,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         runOnUiThread(() -> {
             if (!errorMessages.isEmpty()) {
                 String fullErrorMsg = String.join("\n", errorMessages);
-                Toast.makeText(MainActivity.this,
+                showToastTop(
                         getString(R.string.error_load_failed, fullErrorMsg,""),
-                        Toast.LENGTH_LONG).show();
+                        Toast.LENGTH_LONG);
                 Log.w(TAG, "對比指數載入失敗，但主股成功。繼續繪製。");
             }
 
@@ -3320,9 +3349,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         Log.d(TAG, String.format(Locale.US, "開始請求主股 %s 和對比指數 %s，間隔 %s。",
                 mainSymbol, comparisonSymbol, interval));
 
-        Toast.makeText(this,
+        showToastTop(
                 getString(R.string.toast_loading, mainSymbol, comparisonSymbol, displayText[currentIntervalIndex]),
-                Toast.LENGTH_SHORT).show();
+                Toast.LENGTH_SHORT);
 
         final AtomicInteger fetchCount = new AtomicInteger(0);
         final List<String> errorMessages = Collections.synchronizedList(new ArrayList<>());
@@ -3379,9 +3408,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
 
             if (!errorMessages.isEmpty()) {
-                Toast.makeText(MainActivity.this,
+                showToastTop(
                         getString(R.string.error_load_failed, fullErrorMsg, ""),
-                        Toast.LENGTH_LONG).show();
+                        Toast.LENGTH_LONG);
                 Log.w(TAG, "對比指數載入失敗，但主股成功。繼續繪製。");
             }
 
