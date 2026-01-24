@@ -4593,7 +4593,33 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             float yRange = mainChart.getAxisLeft().getAxisMaximum() - mainChart.getAxisLeft().getAxisMinimum();
             float offset = yRange * 0.015f;
 
-            MacdDivergenceUtil.Result div = MacdDivergenceUtil.compute(displayedList);
+            MacdDivergenceUtil.Result divConfirmed = MacdDivergenceUtil.compute(displayedList);       // 分型確認版
+            MacdDivergenceUtil.Result divPastOnly  = MacdDivergenceUtil.computePastOnly(displayedList); // past-only
+            //MacdDivergenceUtil.logPastOnlyTailHitsLastN(displayedList, 2); // For Debug
+// 合併：整段用 confirmed，但最後兩根（n-2, n-1）改用 past-only 的訊號
+            int n = displayedList.size();
+            int k = Math.min(2, n);
+            int start = n - k;
+
+            MacdDivergenceUtil.Result div = new MacdDivergenceUtil.Result();
+
+// 先放 confirmed 全部結果
+            div.difBottom.addAll(divConfirmed.difBottom);
+            div.difTop.addAll(divConfirmed.difTop);
+            div.histBottom.addAll(divConfirmed.histBottom);
+            div.histTop.addAll(divConfirmed.histTop);
+
+// 移除 confirmed 中落在最後兩根的訊號（理論上分型版不會有 n-2/n-1，但保險）
+            removeIdxFrom(div.difBottom, start);
+            removeIdxFrom(div.difTop, start);
+            removeIdxFrom(div.histBottom, start);
+            removeIdxFrom(div.histTop, start);
+
+// 把 past-only 在最後兩根的訊號補上（等同 Python 覆蓋最後兩根）
+            addTailIdx(divPastOnly.difBottom, div.difBottom, start);
+            addTailIdx(divPastOnly.difTop, div.difTop, start);
+            addTailIdx(divPastOnly.histBottom, div.histBottom, start);
+            addTailIdx(divPastOnly.histTop, div.histTop, start);
 
             for (int idx : div.difBottom) {
                 difUp.add(new Entry(idx, (float) displayedList.get(idx).getLow() - offset));
@@ -4666,7 +4692,19 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         mainChart.notifyDataSetChanged();
         mainChart.invalidate();
     }
+    private static void removeIdxFrom(List<Integer> idxs, int startInclusive) {
+        for (int i = idxs.size() - 1; i >= 0; i--) {
+            if (idxs.get(i) >= startInclusive) idxs.remove(i);
+        }
+    }
 
+    private static void addTailIdx(List<Integer> src, List<Integer> dst, int startInclusive) {
+        for (int idx : src) {
+            if (idx >= startInclusive && !dst.contains(idx)) {
+                dst.add(idx);
+            }
+        }
+    }
     private void addScatterDataSet(ScatterData data, List<Entry> entries, String color, int shapeType, float size) {
         if (entries == null || entries.isEmpty()) return;
 

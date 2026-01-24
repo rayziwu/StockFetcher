@@ -499,7 +499,15 @@ public final class ScreenerEngine {
 
         //MacdCalculator.calculateMACD(list);
 
-        MacdDivergenceUtil.Result div = MacdDivergenceUtil.compute(list);
+        MacdDivergenceUtil.Result div;
+        if (lastBars <= 2) {
+            // 對齊 Python：div_n<=2 用 past-only（可對最後一根/兩根判定）
+            div = MacdDivergenceUtil.computePastOnly(list);
+        } else {
+            // div_n>2 用分型確認版（較穩）
+            div = MacdDivergenceUtil.compute(list);
+        }
+
         boolean ok = div.hasInLastBars(list.size(), lastBars, side);
         if (!ok) return null;
 
