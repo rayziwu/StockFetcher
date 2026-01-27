@@ -6,5 +6,6 @@ public enum ScreenerMode {
     MA60_3PCT, // close within ±3% of MA60 for last 40
     MACD_DIV_RECENT,   // ✅ 新增第4
     KD_GC_RECENT,      // ✅ 新第5項：最近N根XK內有KD黃金交叉
+    MODE_1234,   // ✅ 新增：1234篩選
     CSV_LIST   // load list from CSV
 }

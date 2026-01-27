@@ -31,6 +31,7 @@ public final class ScreenerEngine {
         public String  macdDivSide;   // "BOTTOM/TOP" (or "底/頂")
         public Integer kdGcBars;  // 最近N根，預設2
         public String  kdGcTf;    // 時/日/周/月（或 Hour/Day/Week/Month）
+        public String m1234LimitUpRule; // "0"/"1"/">1"
 
     }
 
@@ -100,6 +101,9 @@ public final class ScreenerEngine {
                     return new ModeConfig("1h", 0, 0.0, true, 0, false,
                             0, 0, false, 0, 0.0, false);
 
+                case MODE_1234:
+                    return new ModeConfig("1d", 0, 0.0, true, 0, false,
+                            0, 0, false, 0, 0.0, false);
                 default:
                     throw new IllegalArgumentException("Unsupported mode: " + mode);
             }
@@ -206,6 +210,13 @@ public final class ScreenerEngine {
                 if (r != null) out.add(r);
                 continue;
             }
+
+            if (mode == ScreenerMode.MODE_1234) {
+                String rule = (ov != null && ov.m1234LimitUpRule != null) ? ov.m1234LimitUpRule : "1";
+                ScreenerResult r = eval1234(info, data, rule);
+                if (r != null) out.add(r);
+                continue;
+            }
             // MA60 band
             if (cfg.needMaBand) {
                 ScreenerResult r = evalMaBand(info, data, maWindow, maBand, maDays);
@@ -232,6 +243,100 @@ public final class ScreenerEngine {
 
         out.sort(Comparator.comparingDouble((ScreenerResult r) -> r.avgClose60).reversed());
         return out;
+    }
+    private static ScreenerResult eval1234(TickerInfo info, List<StockDayPrice> list, String limitUpRule) {
+        if (list == null || list.size() < 60) return null;
+
+        list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
+
+        final int lookN = 20;
+        final double limitUpThr = 0.095;
+
+        int n = list.size();
+        int winStart = Math.max(0, n - lookN);
+
+        // pull arrays
+        double[] close = new double[n];
+        double[] high  = new double[n];
+        double[] low   = new double[n];
+        double[] vol   = new double[n];
+        for (int i = 0; i < n; i++) {
+            StockDayPrice p = list.get(i);
+            close[i] = p.getClose();
+            high[i]  = p.getHigh();
+            low[i]   = p.getLow();
+            vol[i]   = p.getVolume();
+        }
+
+        // 1) limit up cnt in last 20
+        int limitUpCnt = 0;
+        for (int i = winStart; i < n; i++) {
+            if (i <= 0) continue;
+            double pct = (close[i] / close[i - 1]) - 1.0;
+            if (Double.isFinite(pct) && pct >= limitUpThr) limitUpCnt++;
+        }
+
+        // 2) gap up cnt (low > prev high)
+        int gapUpCnt = 0;
+        for (int i = winStart; i < n; i++) {
+            if (i <= 0) continue;
+            if (Double.isFinite(low[i]) && Double.isFinite(high[i - 1]) && low[i] > high[i - 1]) gapUpCnt++;
+        }
+
+        // 3) vol > vol_ma20 consecutive max
+        double[] prefix = new double[n + 1];
+        prefix[0] = 0.0;
+        for (int i = 0; i < n; i++) prefix[i + 1] = prefix[i] + vol[i];
+
+        boolean[] volAbove = new boolean[n - winStart];
+        for (int k = 0; k < volAbove.length; k++) {
+            int i = winStart + k;
+            if (i >= 19) {
+                double ma20 = (prefix[i + 1] - prefix[i + 1 - 20]) / 20.0;
+                volAbove[k] = Double.isFinite(ma20) && ma20 > 0 && vol[i] > ma20;
+            } else {
+                volAbove[k] = false;
+            }
+        }
+        int volRunMax = maxConsecutiveTrue(volAbove);
+
+        // 4) close up consecutive max (first in window forced false)
+        boolean[] up = new boolean[n - winStart];
+        for (int k = 0; k < up.length; k++) {
+            int i = winStart + k;
+            if (k == 0 || i <= 0) up[k] = false;
+            else up[k] = Double.isFinite(close[i]) && Double.isFinite(close[i - 1]) && close[i] > close[i - 1];
+        }
+        int upRunMax = maxConsecutiveTrue(up);
+
+        // rule c1
+        String rule = (limitUpRule == null) ? "1" : limitUpRule.trim();
+        boolean c1;
+        if ("0".equals(rule)) c1 = (limitUpCnt == 0);
+        else if (">1".equals(rule)) c1 = (limitUpCnt >= 2);
+        else c1 = (limitUpCnt == 1);
+
+        boolean c2 = (gapUpCnt >= 1);
+        boolean c3 = (volRunMax >= 3);
+        boolean c4 = (upRunMax >= 4);
+
+        if (!(c1 && c2 && c3 && c4)) return null;
+
+        return ScreenerResult.for1234(
+                info.ticker, info.name, info.industry,
+                avgCloseLastN(list, 60), list.get(n - 1).getClose(),
+                rule, limitUpCnt, gapUpCnt, volRunMax, upRunMax
+        );
+    }
+
+    private static int maxConsecutiveTrue(boolean[] arr) {
+        int best = 0, cur = 0;
+        if (arr == null) return 0;
+        for (boolean b : arr) {
+            if (b) { cur++; if (cur > best) best = cur; }
+            else cur = 0;
+        }
+        return best;
     }
     private static String resolveMaBandInterval(Overrides ov) {
         if (ov == null || ov.maTf == null) return "1d";

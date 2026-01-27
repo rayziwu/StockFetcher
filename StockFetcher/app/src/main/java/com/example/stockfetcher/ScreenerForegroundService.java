@@ -52,6 +52,7 @@ public class ScreenerForegroundService extends Service {
     public static final String EXTRA_MACD_DIV_SIDE = "macd_div_side";   // String: "底/頂" or "BOTTOM/TOP"
     public static final String EXTRA_MA_TF = "ma_tf";
     public static final String EXTRA_MA_WINDOW = "ma_window";
+    public static final String EXTRA_1234_LIMITUP_RULE = "m1234_limitup_rule"; // "0"/"1"/">1"
     private static final String CH_ID = "screener_channel";
     private static final int NOTIF_ID = 1001;
     public static final String EXTRA_KD_GC_BARS = "kd_gc_bars";
@@ -125,6 +126,8 @@ public class ScreenerForegroundService extends Service {
             ov.macdDivSide = getTrimmedStringOrNull(intent, EXTRA_MACD_DIV_SIDE);
             ov.kdGcBars = getIntOrNull(intent, EXTRA_KD_GC_BARS);
             ov.kdGcTf   = getTrimmedStringOrNull(intent, EXTRA_KD_GC_TF);
+
+            ov.m1234LimitUpRule = getTrimmedStringOrNull(intent, EXTRA_1234_LIMITUP_RULE);
 
             //Log.d("ScreenerSvc", "mode=" + mode
             //        + " ov.ltThr=" + ov.ltThr + " ov.ltDays=" + ov.ltDays
@@ -394,6 +397,7 @@ public class ScreenerForegroundService extends Service {
                 case MA60_3PCT: tag = "MA±%"; break;
                 case MACD_DIV_RECENT: tag = "MACD_DIV"; break;
                 case KD_GC_RECENT: tag = "KD_GC"; break;   // ✅ 新增
+                case MODE_1234: tag = "1234"; break;
                 default: tag = "MODE"; break;
 
 
@@ -404,6 +408,8 @@ public class ScreenerForegroundService extends Service {
                 String header;
                 if (mode == ScreenerMode.MA60_3PCT) {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose,MA_60,MA60_DiffPct\n";
+                } else if (mode == ScreenerMode.MODE_1234) {
+                    header = "Ticker,Name,Industry,LimitUpRule,LimitUp_20d,GapUp_20d,VolRunMax_20d,UpRunMax_20d,LatestClose\n";
                 } else if (mode == ScreenerMode.GT45) {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40,KD45_RunDays\n";
                 } else if (mode == ScreenerMode.LT20) {
@@ -427,6 +433,13 @@ public class ScreenerForegroundService extends Service {
                             fw.write("," + numObj(r.lastK) + "," + (r.runDays == null ? "" : r.runDays));
                         } else if (mode == ScreenerMode.LT20) {
                             fw.write("," + numObj(r.lastK));
+                        } else if (mode == ScreenerMode.MODE_1234) {
+                            fw.write("," + csv(r.m1234LimitUpRule)
+                                    + "," + intObj(r.m1234LimitUp20d)
+                                    + "," + intObj(r.m1234GapUp20d)
+                                    + "," + intObj(r.m1234VolRunMax20d)
+                                    + "," + intObj(r.m1234UpRunMax20d)
+                            );
                         }
                         fw.write("\n");
                     }
@@ -437,7 +450,9 @@ public class ScreenerForegroundService extends Service {
             return null;
         }
     }
-
+    private String intObj(Integer v) {
+        return (v == null) ? "" : String.valueOf(v);
+    }
     private String csv(String s) {
         if (s == null) return "";
         boolean q = s.contains(",") || s.contains("\"") || s.contains("\n") || s.contains("\r");

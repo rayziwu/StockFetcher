@@ -101,6 +101,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private int activeMacdDivBars = 2;
     private String activeMacdDivTf = "時";
     private String activeMacdDivSide = "底";
+    private String p1234LimitUpRule = "1";      // "0" / "1" / ">1"（預設 1 次）
+    private String active1234LimitUpRule = "1";
 
     private int screenerIndex = 0;
     private boolean screenerSessionClosed = true;
@@ -1852,6 +1854,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         activeKdGcBars = pKdGcBars;
         activeKdGcTf   = pKdGcTf;
+        active1234LimitUpRule = p1234LimitUpRule;
 
         this.screenerMode = mode;
         this.isScreening = true;
@@ -1885,6 +1888,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         it.putExtra(ScreenerForegroundService.EXTRA_KD_GC_BARS, activeKdGcBars);
         it.putExtra(ScreenerForegroundService.EXTRA_KD_GC_TF,   activeKdGcTf);
+
+        it.putExtra(ScreenerForegroundService.EXTRA_1234_LIMITUP_RULE, active1234LimitUpRule);
         // ✅ 若使用「從檔案讀取」模式：把 CSV 路徑傳給 Service
         if (pendingTickerCsvPathForScreening != null && !pendingTickerCsvPathForScreening.trim().isEmpty()) {
             it.putExtra(ScreenerForegroundService.EXTRA_TICKER_CSV_PATH, pendingTickerCsvPathForScreening);
@@ -2224,10 +2229,62 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             row5.addView(mkText.apply("bars KD golden cross"));
         }
 
-        // ---------- Row 6: CSV list ----------
-        android.widget.TextView row6 = mkText.apply(getString(R.string.screener_mode_csv_list));
-        row6.setPadding(0, dp6, 0, dp6);
+        final String[] ruleItems = new String[] {
+                getString(R.string.screener_1234_rule_0),
+                getString(R.string.screener_1234_rule_1),
+                getString(R.string.screener_1234_rule_gt1),
+        };
+
+        java.util.function.Function<String, Integer> ruleToIndex = (v) -> {
+            if (v == null) return 1;
+            String s = v.trim();
+            if ("0".equals(s)) return 0;
+            if (">1".equals(s) || ">=2".equals(s)) return 2;
+            return 1; // "1"
+        };
+
+        java.util.function.Function<Integer, String> indexToRule = (idx) -> {
+            if (idx == 0) return "0";
+            if (idx == 2) return ">1";
+            return "1";
+        };
+
+        final android.widget.NumberPicker np1234Rule = new android.widget.NumberPicker(this);
+        np1234Rule.setMinValue(0);
+        np1234Rule.setMaxValue(ruleItems.length - 1);
+        np1234Rule.setDisplayedValues(ruleItems);
+        np1234Rule.setWrapSelectorWheel(true);
+        np1234Rule.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        np1234Rule.setValue(ruleToIndex.apply(p1234LimitUpRule));
+
+        android.widget.LinearLayout.LayoutParams lp1234 =
+                new android.widget.LinearLayout.LayoutParams(dp72, dp60);
+        lp1234.leftMargin = dp2;
+        lp1234.rightMargin = dp2;
+        np1234Rule.setLayoutParams(lp1234);
+
+        android.widget.LinearLayout row6 = new android.widget.LinearLayout(this);
+        row6.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row6.setPadding(0, dp2, 0, dp2);
+        row6.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row6.setClickable(true);
+
+        if (isZh) {
+            row6.addView(mkText.apply(getString(R.string.screener_mode_1234) + " "));
+            row6.addView(mkText.apply(getString(R.string.screener_1234_last20) + " "));
+            row6.addView(mkText.apply(getString(R.string.screener_1234_limitup)));
+            row6.addView(np1234Rule);
+        } else {
+            row6.addView(mkText.apply(getString(R.string.screener_mode_1234) + " "));
+            row6.addView(mkText.apply(getString(R.string.screener_1234_last20) + " "));
+            row6.addView(mkText.apply(getString(R.string.screener_1234_limitup)));
+            row6.addView(np1234Rule);
+        }
+
+        // ---------- Row 7: CSV list ----------
+        android.widget.TextView row7 = mkText.apply(getString(R.string.screener_mode_csv_list));
+        row7.setPadding(0, dp6, 0, dp6);
+        row7.setClickable(true);
 
         // add rows
         root.addView(row1);
@@ -2236,6 +2293,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         root.addView(row4);
         root.addView(row5);
         root.addView(row6);
+        root.addView(row7);
 
         final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.screener_title)
@@ -2311,6 +2369,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         });
 
         row6.setOnClickListener(v -> {
+            p1234LimitUpRule = indexToRule.apply(np1234Rule.getValue());
+            dlg.dismiss();
+            ensureTickerFileThenStart(ScreenerMode.MODE_1234);
+        });
+
+        row7.setOnClickListener(v -> {
             dlg.dismiss();
             openCsvListPicker();
         });
