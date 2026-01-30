@@ -3295,7 +3295,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
 
     // 統一：若是 4,5 位數字且無後綴，走 .TW / .TWO fallback；否則直接抓
-    private void fetchSymbolAutoFallback(String symbol, String interval, long startTime,
+    private void fetchSymbolAutoFallback(String symbol, String interval, long startTime, boolean applyTwIntraday,
                                          YahooFinanceFetcher.DataFetchListener listener) {
         String base = symbol.toUpperCase(Locale.US).trim();
 
@@ -3349,13 +3349,16 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void fetchStockDataWithFallback(String symbol, String interval, long startTime) {
         String baseSymbol = symbol.toUpperCase(Locale.US).trim();
 
-        // 指數或已帶後綴：直接走 entry
+        // 指數或已帶後綴：直接走 entry（你 fetchMainAndComparisonData 那邊已經做主=true、比較=false）
         if (baseSymbol.startsWith("^") || baseSymbol.contains(".")) {
             fetchStockDataEntry(baseSymbol, interval, startTime);
             return;
         }
 
-        fetchSymbolAutoFallback(baseSymbol, interval, startTime, new YahooFinanceFetcher.DataFetchListener() {
+        // ✅ 主股票：允許套用盤中K（實際只會對 .TW/.TWO 且 1d/1h 生效）
+        final boolean applyTwIntraday = true;
+
+        fetchSymbolAutoFallback(baseSymbol, interval, startTime, applyTwIntraday, new YahooFinanceFetcher.DataFetchListener() {
             @Override
             public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
                 if (!data.isEmpty()) {
@@ -3370,15 +3373,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             public void onError(String errorMessage) {
                 Log.e(TAG, baseSymbol + " 載入失敗: " + errorMessage);
                 clearAllCharts(getString(R.string.error_load_failed, baseSymbol, errorMessage));
-                runOnUiThread(() ->
-                        showToastTop(
-                                errorMessage,
-                                Toast.LENGTH_LONG)
-                );
+                runOnUiThread(() -> showToastTop(errorMessage, Toast.LENGTH_LONG));
             }
         });
     }
-
     private void fetchStockDataEntry(String symbol, String interval, long startTime) {
         currentStockId = symbol.toUpperCase(Locale.US).trim();
         currentInterval = interval;
@@ -3409,7 +3407,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         final List<String> errorMessages = Collections.synchronizedList(new ArrayList<>());
 
-        fetchSymbolAutoFallback(baseSymbol, interval, startTimeLimit, new YahooFinanceFetcher.DataFetchListener() {
+        fetchSymbolAutoFallback(baseSymbol, interval, startTimeLimit, false, new YahooFinanceFetcher.DataFetchListener() {
             @Override
             public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
                 if (!data.isEmpty()) {
@@ -3460,7 +3458,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         final AtomicInteger fetchCount = new AtomicInteger(0);
         final List<String> errorMessages = Collections.synchronizedList(new ArrayList<>());
 
-        yahooFinanceFetcher.fetchStockDataAsync(mainSymbol, interval, startTimeLimit, new YahooFinanceFetcher.DataFetchListener() {
+        yahooFinanceFetcher.fetchStockDataAsync(mainSymbol, interval, startTimeLimit, true, new YahooFinanceFetcher.DataFetchListener() {
             @Override
             public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
                 if (!data.isEmpty()) {
@@ -3479,7 +3477,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         });
 
-        yahooFinanceFetcher.fetchStockDataAsync(comparisonSymbol, interval, startTimeLimit, new YahooFinanceFetcher.DataFetchListener() {
+        yahooFinanceFetcher.fetchStockDataAsync(comparisonSymbol, interval, startTimeLimit, false, new YahooFinanceFetcher.DataFetchListener() {
             @Override
             public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
                 if (!data.isEmpty()) {
@@ -3526,8 +3524,12 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     // X 軸日期格式化
     private class MyXAxisFormatter extends ValueFormatter {
         private final List<StockDayPrice> displayedDataList;
-        private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());
-        private final SimpleDateFormat inFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+
+        private final SimpleDateFormat outDay = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());
+        private final SimpleDateFormat outHour = new SimpleDateFormat("MM/dd HH", Locale.getDefault());
+
+        private final SimpleDateFormat inYmd = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+        private final SimpleDateFormat inYmdHm = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault());
 
         public MyXAxisFormatter(List<StockDayPrice> displayedDataList) {
             this.displayedDataList = displayedDataList;
@@ -3537,13 +3539,19 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         public String getAxisLabel(float value, AxisBase axis) {
             int index = (int) value;
             if (index < 0 || index >= displayedDataList.size()) return "";
-            String dateString = displayedDataList.get(index).getDate();
+            String s = displayedDataList.get(index).getDate();
+
             try {
-                Date date = inFormat.parse(dateString);
-                return (date == null) ? dateString : dateFormat.format(date);
+                Date d;
+                if (s != null && s.length() >= 16) {
+                    d = inYmdHm.parse(s);
+                    return (d == null) ? s : outHour.format(d);
+                } else {
+                    d = inYmd.parse(s);
+                    return (d == null) ? s : outDay.format(d);
+                }
             } catch (Exception e) {
-                Log.e(TAG, "日期格式轉換錯誤: " + e.getMessage());
-                return dateString;
+                return s;
             }
         }
     }
