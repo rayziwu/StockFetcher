@@ -2086,6 +2086,68 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.addView(root);
 
+        final String s0  = getString(R.string.screener_1234_rule_0);    // 0次
+        final String s1  = getString(R.string.screener_1234_rule_1);    // 1次
+        final String sgt = getString(R.string.screener_1234_rule_gt1);  // >1次
+
+        final String[] ruleItems = new String[] {
+                s0, s1, sgt,
+                s0, s1, sgt
+        };
+
+        java.util.function.Function<String, Integer> ruleToIndex = (v) -> {
+            String s = (v == null) ? "1" : v.trim();
+
+            int base;
+            if ("0".equals(s)) base = 0;
+            else if (">1".equals(s) || ">=2".equals(s)) base = 2;
+            else base = 1; // "1"
+
+            // 放到第二輪：3/4/5
+            return base + 3;
+        };
+
+        java.util.function.Function<Integer, String> indexToRule = (idx) -> {
+            int m = ((idx % 3) + 3) % 3; // 防負數
+            if (m == 0) return "0";
+            if (m == 2) return ">1";
+            return "1";
+        };
+
+        java.util.function.Function<String, android.widget.NumberPicker> mkRulePicker = (defRule) -> {
+            android.widget.NumberPicker np = new android.widget.NumberPicker(this);
+            np.setMinValue(0);
+            np.setMaxValue(ruleItems.length - 1);
+            np.setDisplayedValues(ruleItems);
+            np.setWrapSelectorWheel(true);
+            np.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+
+            int idx = ruleToIndex.apply(defRule);
+            if (idx < 0 || idx >= ruleItems.length) idx = 1;
+            np.setValue(idx);
+
+            // ✅ 固定寬度 + 固定高度（完全比照 mkTfPicker）
+            android.widget.LinearLayout.LayoutParams lp =
+                    new android.widget.LinearLayout.LayoutParams(dp44, dp60);
+            lp.leftMargin = dp2;
+            lp.rightMargin = dp2;
+            np.setLayoutParams(lp);
+
+            np.setPadding(0, 0, 0, 0);
+
+            try {
+                int id = getResources().getIdentifier("numberpicker_input", "id", "android");
+                android.widget.EditText input = np.findViewById(id);
+                if (input != null) {
+                    input.setPadding(0, input.getPaddingTop(), 0, input.getPaddingBottom());
+                    input.setGravity(android.view.Gravity.CENTER);
+                }
+            } catch (Exception ignored) {}
+
+            np.setMinimumWidth(dp44);
+            return np;
+        };
+
         // ---------- Row 1: LT20 ----------
         final android.widget.EditText etLtThr  = mk2d.apply(pLtThr);
         final android.widget.EditText etLtDays = mk2d.apply(pLtDays);
@@ -2229,39 +2291,10 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             row5.addView(mkText.apply("bars KD golden cross"));
         }
 
-        final String[] ruleItems = new String[] {
-                getString(R.string.screener_1234_rule_0),
-                getString(R.string.screener_1234_rule_1),
-                getString(R.string.screener_1234_rule_gt1),
-        };
-
-        java.util.function.Function<String, Integer> ruleToIndex = (v) -> {
-            if (v == null) return 1;
-            String s = v.trim();
-            if ("0".equals(s)) return 0;
-            if (">1".equals(s) || ">=2".equals(s)) return 2;
-            return 1; // "1"
-        };
-
-        java.util.function.Function<Integer, String> indexToRule = (idx) -> {
-            if (idx == 0) return "0";
-            if (idx == 2) return ">1";
-            return "1";
-        };
-
-        final android.widget.NumberPicker np1234Rule = new android.widget.NumberPicker(this);
-        np1234Rule.setMinValue(0);
-        np1234Rule.setMaxValue(ruleItems.length - 1);
-        np1234Rule.setDisplayedValues(ruleItems);
-        np1234Rule.setWrapSelectorWheel(true);
-        np1234Rule.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        np1234Rule.setValue(ruleToIndex.apply(p1234LimitUpRule));
-
-        android.widget.LinearLayout.LayoutParams lp1234 =
-                new android.widget.LinearLayout.LayoutParams(dp72, dp60);
-        lp1234.leftMargin = dp2;
-        lp1234.rightMargin = dp2;
-        np1234Rule.setLayoutParams(lp1234);
+        // ---------- Row 6: 1234 (one line) ----------
+        // ---------- Row 6: 1234 (one line) ----------
+        final android.widget.NumberPicker np1234Rule = mkRulePicker.apply(p1234LimitUpRule);
+// ✅ 若你想寬一點（避免字擠），把 mkRulePicker 裡 dp60 改 dp72 即可
 
         android.widget.LinearLayout row6 = new android.widget.LinearLayout(this);
         row6.setOrientation(android.widget.LinearLayout.HORIZONTAL);
@@ -2270,15 +2303,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row6.setClickable(true);
 
         if (isZh) {
-            row6.addView(mkText.apply(getString(R.string.screener_mode_1234) + " "));
-            row6.addView(mkText.apply(getString(R.string.screener_1234_last20) + " "));
-            row6.addView(mkText.apply(getString(R.string.screener_1234_limitup)));
+            row6.addView(mkText.apply("1234篩選 最近20日"));
             row6.addView(np1234Rule);
+            row6.addView(mkText.apply("漲停"));
         } else {
-            row6.addView(mkText.apply(getString(R.string.screener_mode_1234) + " "));
-            row6.addView(mkText.apply(getString(R.string.screener_1234_last20) + " "));
-            row6.addView(mkText.apply(getString(R.string.screener_1234_limitup)));
+            row6.addView(mkText.apply("1234screen Last 20days"));
             row6.addView(np1234Rule);
+            row6.addView(mkText.apply("limit-up"));
         }
 
         // ---------- Row 7: CSV list ----------

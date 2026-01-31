@@ -146,12 +146,12 @@
     <string name="toast_carousel_list_empty">Carousel list is empty.</string>
     <string name="toast_favorites_empty">Favorites list is empty.</string>
     <string name="screener_pick_from_file">Load from file</string>
-    <string name="screener_mode_1234">1234篩選</string>
-    <string name="screener_1234_limitup">漲停</string>
-    <string name="screener_1234_last20">最近20日</string>
-    <string name="screener_1234_rule_0">0次</string>
-    <string name="screener_1234_rule_1">1次</string>
-    <string name="screener_1234_rule_gt1">&gt;1次</string>
+    <string name="screener_mode_1234">1234 Screen</string>
+    <string name="screener_1234_limitup">Limit-up</string>
+    <string name="screener_1234_last20">Last 20days</string>
+    <string name="screener_1234_rule_0">0</string>
+    <string name="screener_1234_rule_1">1</string>
+    <string name="screener_1234_rule_gt1">&gt;1</string>
 
     <string-array name="div_tf_items">
         <item>@string/div_tf_hour</item>
