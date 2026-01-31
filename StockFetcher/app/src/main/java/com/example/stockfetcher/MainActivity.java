@@ -4354,7 +4354,13 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void drawCharts(List<StockDayPrice> fullPriceList, String symbol) {
         String mode = VIEW_MODES[currentViewModeIndex];
 
-        List<StockDayPrice> cleanedFull = OhlcCleaners.cleanOhlc(fullPriceList, currentInterval);
+        boolean isTw = currentStockId != null && (
+                currentStockId.toUpperCase(Locale.US).endsWith(".TW") ||
+                        currentStockId.toUpperCase(Locale.US).endsWith(".TWO")
+        );
+        boolean keepIncomplete = isTw && ("1wk".equals(currentInterval) || "1mo".equals(currentInterval));
+
+        List<StockDayPrice> cleanedFull = OhlcCleaners.cleanOhlc(fullPriceList, currentInterval, keepIncomplete);
         if (cleanedFull == null || cleanedFull.isEmpty()) {
             clearAllCharts("無 " + symbol + " 歷史數據可供繪製。");
             return;

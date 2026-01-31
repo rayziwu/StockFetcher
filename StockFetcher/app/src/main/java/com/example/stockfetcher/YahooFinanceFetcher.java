@@ -69,7 +69,30 @@ public class YahooFinanceFetcher {
             this.vShares = vShares;
         }
     }
+    private List<StockDayPrice> fetchRecentDaily(String symbolUpper) throws IOException {
+        long nowSec = System.currentTimeMillis() / 1000L;
+        long p1 = nowSec - 120L * 86400L;
+        long p2 = nowSec;
 
+        String url = String.format(Locale.US, YAHOO_BASE_URL, symbolUpper, symbolUpper, "1d", p1, p2);
+
+        try (Response r = client.newCall(new Request.Builder().url(url).build()).execute()) {
+            if (!r.isSuccessful() || r.body() == null) throw new IOException("daily fetch failed");
+            String js = r.body().string();
+            List<StockDayPrice> d = parseYahooData(js, "1d", symbolUpper);
+            Collections.sort(d, Comparator.comparing(StockDayPrice::getDate));
+            return d;
+        }
+    }
+    private static final class PeriodSnap {
+        final String keyDate;   // 用來 upsert 到 1wk/1mo list 的 date key（yyyy-MM-dd）
+        final double o,h,l,c,vShares;
+        PeriodSnap(String keyDate, double o, double h, double l, double c, double vShares) {
+            this.keyDate = keyDate; this.o=o; this.h=h; this.l=l; this.c=c; this.vShares=vShares;
+        }
+    }
+    private final Map<String, PeriodSnap> intradayWeekCache  = new ConcurrentHashMap<>();
+    private final Map<String, PeriodSnap> intradayMonthCache = new ConcurrentHashMap<>();
     private final Map<String, DailySnap> intradayDailyCache = new ConcurrentHashMap<>();
     private final Map<String, HourSnap> intradayHourCache  = new ConcurrentHashMap<>();
 
@@ -171,6 +194,10 @@ public class YahooFinanceFetcher {
                         result = applyTwseMisDailyBar(result, processedSymbol);
                     } else if ("1h".equals(interval)) {
                         result = applyYahoo1mAggregateHourBar(result, processedSymbol);
+                    } else if ("1wk".equals(interval)) {
+                        result = applyYahoo1dAggregateWeekBar(result, processedSymbol);
+                    } else if ("1mo".equals(interval)) {
+                        result = applyYahoo1dAggregateMonthBar(result, processedSymbol);
                     }
                     Collections.sort(result, Comparator.comparing(StockDayPrice::getDate));
                 }
@@ -441,7 +468,183 @@ public class YahooFinanceFetcher {
         }
         return out;
     }
+    private static boolean belongsToCurrentIsoWeek(LocalDate barDate, LocalDate today) {
+        if (barDate == null || today == null) return false;
+        // 兼容「下週週一代表本週」：date-1day 是本週的週日
+        return isSameIsoWeek(barDate, today) || isSameIsoWeek(barDate.minusDays(1), today);
+    }
 
+    private static boolean belongsToCurrentMonth(LocalDate barDate, LocalDate today) {
+        if (barDate == null || today == null) return false;
+
+        int y = today.getYear();
+        int m = today.getMonthValue();
+
+        if (barDate.getYear() == y && barDate.getMonthValue() == m) return true;
+
+        // 兼容「下月1號代表本月」：date-1day 還在本月
+        LocalDate d1 = barDate.minusDays(1);
+        return d1.getYear() == y && d1.getMonthValue() == m;
+    }
+    private static List<StockDayPrice> upsertByDateKey(List<StockDayPrice> in, String keyDate,
+                                                       double o, double h, double l, double c, double vShares) {
+        ArrayList<StockDayPrice> out = new ArrayList<>(in.size() + 1);
+        boolean replaced = false;
+
+        for (StockDayPrice p : in) {
+            if (p == null) continue;
+            if (!replaced && keyDate.equals(p.getDate())) {
+                out.add(new StockDayPrice(keyDate, o, h, l, c, Double.isFinite(vShares) ? vShares : p.getVolume()));
+                replaced = true;
+            } else {
+                out.add(p);
+            }
+        }
+        if (!replaced) {
+            out.add(new StockDayPrice(keyDate, o, h, l, c, Double.isFinite(vShares) ? vShares : Double.NaN));
+        }
+        return out;
+    }
+
+    private static LocalDate parseYmd(String s) {
+        try {
+            if (s == null || s.length() < 10) return null;
+            String ymd = s.substring(0, 10);
+            return LocalDate.parse(ymd, FMT_YMD);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean isSameIsoWeek(LocalDate a, LocalDate b) {
+        java.time.temporal.WeekFields wf = java.time.temporal.WeekFields.ISO;
+        int aY = a.get(wf.weekBasedYear());
+        int aW = a.get(wf.weekOfWeekBasedYear());
+        int bY = b.get(wf.weekBasedYear());
+        int bW = b.get(wf.weekOfWeekBasedYear());
+        return aY == bY && aW == bW;
+    }
+    private List<StockDayPrice> applyYahoo1dAggregateMonthBar(List<StockDayPrice> inMo, String symbolUpper) {
+        if (inMo == null || inMo.isEmpty()) return inMo;
+
+        String key = symbolUpper.trim().toUpperCase(Locale.US);
+
+        List<StockDayPrice> daily;
+        try {
+            daily = fetchRecentDaily(key);
+            daily = applyTwseMisDailyBar(daily, key);
+        } catch (Exception e) {
+            PeriodSnap snap = intradayMonthCache.get(key);
+            if (snap != null) return upsertByDateKey(inMo, snap.keyDate, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            return inMo;
+        }
+
+        LocalDate today = LocalDate.now(ZONE_TW);
+        LocalDate m1 = today.withDayOfMonth(1);
+
+        final String keyDate = m1.format(FMT_YMD); // ✅ 月K key 固定本月 1 號
+
+        // ✅ 移除「同一月但不是 keyDate」的 bar（例如把 1/30 刪掉，只留 1/1）
+        ArrayList<StockDayPrice> base = new ArrayList<>();
+        for (StockDayPrice p : inMo) {
+            if (p == null) continue;
+            LocalDate d = parseYmd(p.getDate());
+            if (d != null && belongsToCurrentMonth(d, today) && !keyDate.equals(p.getDate())) {
+                continue;
+            }
+            base.add(p);
+        }
+
+        // 本月日K window：[m1, today]
+        ArrayList<StockDayPrice> win = new ArrayList<>();
+        for (StockDayPrice p : daily) {
+            LocalDate d = parseYmd(p.getDate());
+            if (d == null) continue;
+            if (!d.isBefore(m1) && !d.isAfter(today)) win.add(p);
+        }
+
+        if (win.isEmpty()) {
+            PeriodSnap snap = intradayMonthCache.get(key);
+            if (snap != null) return upsertByDateKey(base, snap.keyDate, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            return base;
+        }
+
+        double o = win.get(0).getOpen();
+        double h = win.get(0).getHigh();
+        double l = win.get(0).getLow();
+        double c = win.get(win.size() - 1).getClose();
+        double v = 0.0;
+
+        for (StockDayPrice p : win) {
+            h = Math.max(h, p.getHigh());
+            l = Math.min(l, p.getLow());
+            v += p.getVolume();
+        }
+
+        intradayMonthCache.put(key, new PeriodSnap(keyDate, o, h, l, c, v));
+        return upsertByDateKey(base, keyDate, o, h, l, c, v);
+    }
+    private List<StockDayPrice> applyYahoo1dAggregateWeekBar(List<StockDayPrice> inWk, String symbolUpper) {
+        if (inWk == null || inWk.isEmpty()) return inWk;
+
+        String key = symbolUpper.trim().toUpperCase(Locale.US);
+
+        List<StockDayPrice> daily;
+        try {
+            daily = fetchRecentDaily(key);
+            daily = applyTwseMisDailyBar(daily, key);
+        } catch (Exception e) {
+            PeriodSnap snap = intradayWeekCache.get(key);
+            if (snap != null) return upsertByDateKey(inWk, snap.keyDate, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            return inWk;
+        }
+
+        LocalDate today = LocalDate.now(ZONE_TW);
+        java.time.DayOfWeek dow = today.getDayOfWeek();
+        LocalDate mon = today.minusDays(dow.getValue() - 1L);
+
+        final String keyDate = mon.format(FMT_YMD); // ✅ 週K key 固定週一
+
+        // ✅ 移除「同一週但不是 keyDate」的 bar（例如把 1/30 刪掉，只留 1/26）
+        ArrayList<StockDayPrice> base = new ArrayList<>();
+        for (StockDayPrice p : inWk) {
+            if (p == null) continue;
+            LocalDate d = parseYmd(p.getDate());
+            if (d != null && belongsToCurrentIsoWeek(d, today) && !keyDate.equals(p.getDate())) {
+                continue;
+            }
+            base.add(p);
+        }
+
+        // 本週日K window：[mon, today]
+        ArrayList<StockDayPrice> win = new ArrayList<>();
+        for (StockDayPrice p : daily) {
+            LocalDate d = parseYmd(p.getDate());
+            if (d == null) continue;
+            if (!d.isBefore(mon) && !d.isAfter(today)) win.add(p);
+        }
+
+        if (win.isEmpty()) {
+            PeriodSnap snap = intradayWeekCache.get(key);
+            if (snap != null) return upsertByDateKey(base, snap.keyDate, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            return base;
+        }
+
+        double o = win.get(0).getOpen();
+        double h = win.get(0).getHigh();
+        double l = win.get(0).getLow();
+        double c = win.get(win.size() - 1).getClose();
+        double v = 0.0;
+
+        for (StockDayPrice p : win) {
+            h = Math.max(h, p.getHigh());
+            l = Math.min(l, p.getLow());
+            v += p.getVolume();
+        }
+
+        intradayWeekCache.put(key, new PeriodSnap(keyDate, o, h, l, c, v));
+        return upsertByDateKey(base, keyDate, o, h, l, c, v);
+    }
     // -------------------------
     // intraday 1h: aggregate from Yahoo 1m
     // -------------------------

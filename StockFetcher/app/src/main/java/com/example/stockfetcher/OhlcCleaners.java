@@ -56,50 +56,45 @@ public final class OhlcCleaners {
      * - interval == "1mo"/"1wk"：額外移除未完成的最後一根（月/週進行中）
      */
     public static List<StockDayPrice> cleanOhlc(List<StockDayPrice> src, String interval) {
+        return cleanOhlc(src, interval, false);
+    }
+    public static List<StockDayPrice> cleanOhlc(List<StockDayPrice> src, String interval, boolean keepIncompleteLast) {
         if (src == null || src.isEmpty()) return Collections.emptyList();
 
         final String itv = normInterval(interval);
 
-        // 1) drop invalid rows (Close NaN/Inf) + empty date
         ArrayList<StockDayPrice> a = new ArrayList<>(src.size());
         for (StockDayPrice p : src) {
             if (p == null) continue;
             String ds = safeTrim(p.getDate());
             if (ds.isEmpty()) continue;
-
             double close = p.getClose();
-            if (!Double.isFinite(close)) continue; // 對齊 dropna(subset=["Close"])
-
+            if (!Double.isFinite(close)) continue;
             a.add(p);
         }
         if (a.isEmpty()) return Collections.emptyList();
 
-        // 2) sort by datetime (對齊 sort_index)
         a.sort(Comparator.comparingLong(p -> parseEpochMillisSafe(p.getDate())));
 
-        // 3) interval != "1h": normalize date -> yyyy-MM-dd and dedup keep last
         List<StockDayPrice> out;
         if (!"1h".equals(itv)) {
             LinkedHashMap<String, StockDayPrice> map = new LinkedHashMap<>();
             for (StockDayPrice p : a) {
                 String ymd = normalizeToYmd(p.getDate());
-                // keep last: 覆蓋同 key
                 map.put(ymd, copyWithDateAndIndicators(p, ymd));
             }
             out = new ArrayList<>(map.values());
         } else {
-            // 1h：不 normalize，不去重（對齊 Python）
             out = a;
         }
 
-        // 4) drop incomplete last bar for 1mo/1wk only
-        if ("1mo".equals(itv) || "1wk".equals(itv)) {
+        // ✅ 只有在 keepIncompleteLast=false 時才 drop
+        if (!keepIncompleteLast && ("1mo".equals(itv) || "1wk".equals(itv))) {
             out = dropIncompleteLastBarIfNeeded(out, itv);
         }
 
         return (out == null) ? Collections.emptyList() : out;
     }
-
     // -------------------------
     // helpers
     // -------------------------
