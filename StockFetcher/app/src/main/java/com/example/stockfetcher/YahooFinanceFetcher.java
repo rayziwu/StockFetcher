@@ -1031,7 +1031,7 @@ public class YahooFinanceFetcher {
         for (int i = 0; i < n; i++) {
             prices.get(i).macdDIF = dif[i];
             prices.get(i).macdDEA = dea[i];
-            if (Double.isFinite(dif[i]) && Double.isFinite(dea[i])) prices.get(i).macdHistogram = dif[i] - dea[i];
+            if (Double.isFinite(dif[i]) && Double.isFinite(dea[i])) prices.get(i).macdHistogram = 2*(dif[i] - dea[i]);
         }
     }
 
