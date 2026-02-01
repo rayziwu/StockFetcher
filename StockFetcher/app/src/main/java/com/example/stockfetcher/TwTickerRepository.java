@@ -129,10 +129,13 @@ public final class TwTickerRepository {
     // -----------------------
     private static List<TickerInfo> readCache(Context ctx) {
         try {
-            File f = new File(ctx.getExternalFilesDir(null), CACHE_FILE);
+            File dir = ctx.getExternalFilesDir(null);
+            if (dir == null) return null;
+
+            File f = new File(dir, CACHE_FILE);
             if (!f.exists()) return null;
 
-            // 對齊 Python：可能是 utf-8-sig（有 BOM）
+            // 可能是 utf-8-sig（有 BOM）
             try (BufferedReader br = new BufferedReader(new InputStreamReader(
                     new FileInputStream(f), StandardCharsets.UTF_8))) {
 
@@ -144,7 +147,7 @@ public final class TwTickerRepository {
 
                 int iTicker = -1, iName = -1, iInd = -1;
                 for (int i = 0; i < h.length; i++) {
-                    String col = h[i].trim().toLowerCase(Locale.US);
+                    String col = stripUtf8Bom(h[i]).trim().toLowerCase(Locale.US);
                     if (col.equals("ticker")) iTicker = i;
                     else if (col.equals("name")) iName = i;
                     else if (col.equals("industry") || col.equals("category")) iInd = i;
@@ -155,19 +158,23 @@ public final class TwTickerRepository {
 
                 String line;
                 while ((line = br.readLine()) != null) {
-                    line = line.trim();
+                    line = stripUtf8Bom(line).trim();
                     if (line.isEmpty()) continue;
 
                     String[] cols = splitCsvLine(line);
-                    String ticker = (iTicker >= 0 && iTicker < cols.length) ? cols[iTicker].trim()
-                            : (cols.length > 0 ? cols[0].trim() : "");
+
+                    String ticker = (iTicker >= 0 && iTicker < cols.length)
+                            ? stripUtf8Bom(cols[iTicker]).trim()
+                            : (cols.length > 0 ? stripUtf8Bom(cols[0]).trim() : "");
+
                     if (ticker.isEmpty()) continue;
 
-                    String t = ticker.trim().toUpperCase(Locale.US);
+                    String t = ticker.toUpperCase(Locale.US).trim();
+                    if (t.isEmpty()) continue;
                     if (!seen.add(t)) continue;
 
-                    String name = (iName >= 0 && iName < cols.length) ? cols[iName].trim() : "";
-                    String ind = (iInd >= 0 && iInd < cols.length) ? cols[iInd].trim() : "";
+                    String name = (iName >= 0 && iName < cols.length) ? stripUtf8Bom(cols[iName]).trim() : "";
+                    String ind  = (iInd >= 0 && iInd < cols.length) ? stripUtf8Bom(cols[iInd]).trim() : "";
 
                     out.add(new TickerInfo(t, name, ind));
                 }
@@ -183,17 +190,29 @@ public final class TwTickerRepository {
     private static void writeCache(Context ctx, List<TickerInfo> list) {
         try {
             File f = new File(ctx.getExternalFilesDir(null), CACHE_FILE);
-            try (FileWriter fw = new FileWriter(f, false)) {
+
+            try (java.io.BufferedWriter fw = new java.io.BufferedWriter(
+                    new java.io.OutputStreamWriter(
+                            new java.io.FileOutputStream(f, false),
+                            java.nio.charset.StandardCharsets.UTF_8))) {
+
+                // ✅ UTF-8 BOM（utf-8-sig）→ Windows Excel 直接開不亂碼
+                fw.write('\uFEFF');
+
                 // 對齊 Python：輸出欄位含 Name/Industry
                 fw.write("Ticker,Name,Industry\n");
-                for (TickerInfo ti : list) {
-                    if (ti == null || ti.ticker == null) continue;
-                    fw.write(escapeCsv(ti.ticker));
-                    fw.write(",");
-                    fw.write(escapeCsv(ti.name == null ? "" : ti.name));
-                    fw.write(",");
-                    fw.write(escapeCsv(ti.industry == null ? "" : ti.industry));
-                    fw.write("\n");
+
+                if (list != null) {
+                    for (TickerInfo ti : list) {
+                        if (ti == null || ti.ticker == null) continue;
+
+                        fw.write(escapeCsv(ti.ticker));
+                        fw.write(",");
+                        fw.write(escapeCsv(ti.name == null ? "" : ti.name));
+                        fw.write(",");
+                        fw.write(escapeCsv(ti.industry == null ? "" : ti.industry));
+                        fw.write("\n");
+                    }
                 }
             }
         } catch (Exception e) {

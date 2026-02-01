@@ -271,25 +271,50 @@ public class ScreenerForegroundService extends Service {
         }
     }
 
+    private static String stripBom(String s) {
+        if (s == null) return null;
+        // UTF-8 BOM (\uFEFF) 常見於 pandas.to_csv(..., encoding="utf-8-sig")
+        return s.replace("\uFEFF", "");
+    }
+
+    private static String unquote(String s) {
+        if (s == null) return null;
+        s = s.trim();
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
+            return s.substring(1, s.length() - 1).trim();
+        }
+        return s;
+    }
+
     private java.util.HashSet<String> readTickerSetFromCsv(java.io.File file) {
         java.util.HashSet<String> out = new java.util.HashSet<>();
         if (file == null || !file.exists()) return out;
 
         try (java.io.BufferedReader br = new java.io.BufferedReader(
-                new java.io.InputStreamReader(new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+                new java.io.InputStreamReader(
+                        new java.io.FileInputStream(file),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
 
             String line;
             while ((line = br.readLine()) != null) {
-                line = line.trim();
+                // ✅ 去 BOM、去 \r、trim
+                line = stripBom(line).replace("\r", "").trim();
                 if (line.isEmpty()) continue;
 
+                // ✅ 只取第一欄（逗號前）；若未來可能是 tab 分隔也可加判斷
                 String col0 = line.split(",", -1)[0].trim();
-                if (col0.equalsIgnoreCase("ticker")) continue;
+                col0 = unquote(stripBom(col0)).replace("\r", "").trim();
 
-                String t = col0.toUpperCase(java.util.Locale.US);
+                // ✅ header：兼容 Ticker / ticker / Symbol
+                if (col0.equalsIgnoreCase("ticker") || col0.equalsIgnoreCase("symbol")) continue;
+
+                String t = col0.toUpperCase(java.util.Locale.US).trim();
                 if (!t.isEmpty()) out.add(t);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            // 你原本 ignored；建議至少留 log 方便查問題
+            android.util.Log.e("ScreenerSvc", "readTickerSetFromCsv failed: " + e.getMessage(), e);
+        }
 
         return out;
     }
@@ -386,7 +411,8 @@ public class ScreenerForegroundService extends Service {
     public IBinder onBind(Intent intent) { return null; }
 
     // -------- CSV export --------
-    @Nullable
+
+    @androidx.annotation.Nullable
     private File exportResultsToCsv(ScreenerMode mode, List<ScreenerResult> results) {
         try {
             File dir = getExternalFilesDir(null);
@@ -398,15 +424,22 @@ public class ScreenerForegroundService extends Service {
                 case GT45: tag = "GT45"; break;
                 case MA60_3PCT: tag = "MA±%"; break;
                 case MACD_DIV_RECENT: tag = "MACD_DIV"; break;
-                case KD_GC_RECENT: tag = "KD_GC"; break;   // ✅ 新增
+                case KD_GC_RECENT: tag = "KD_GC"; break;
                 case MODE_1234: tag = "1234"; break;
                 default: tag = "MODE"; break;
-
-
             }
+
             File out = new File(dir, "TW_" + tag + ".csv");
 
-            try (FileWriter fw = new FileWriter(out, false)) {
+            // ✅ 用 UTF-8 輸出 + BOM（utf-8-sig），讓 Windows Excel 直接開不亂碼
+            try (java.io.BufferedWriter fw = new java.io.BufferedWriter(
+                    new java.io.OutputStreamWriter(
+                            new java.io.FileOutputStream(out, false),
+                            java.nio.charset.StandardCharsets.UTF_8))) {
+
+                // BOM: EF BB BF
+                fw.write('\uFEFF');
+
                 String header;
                 if (mode == ScreenerMode.MA60_3PCT) {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose,MA_60,MA60_DiffPct\n";
@@ -417,7 +450,7 @@ public class ScreenerForegroundService extends Service {
                 } else if (mode == ScreenerMode.LT20) {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose,LastK40\n";
                 } else if (mode == ScreenerMode.KD_GC_RECENT) {
-                header = "Ticker,Name,Industry,AvgClose60,LatestClose,CrossDate,LastK,LastD\n";
+                    header = "Ticker,Name,Industry,AvgClose60,LatestClose,CrossDate,LastK,LastD\n";
                 } else {
                     header = "Ticker,Name,Industry,AvgClose60,LatestClose\n";
                 }
@@ -426,29 +459,40 @@ public class ScreenerForegroundService extends Service {
                 if (results != null) {
                     for (ScreenerResult r : results) {
                         if (r == null) continue;
-                        fw.write(csv(r.ticker) + "," + csv(r.name) + "," + csv(r.industry) + ","
-                                + num(r.avgClose60) + "," + num(r.latestClose));
 
-                        if (mode == ScreenerMode.MA60_3PCT) {
-                            fw.write("," + numObj(r.ma60) + "," + numObj(r.ma60DiffPct));
-                        } else if (mode == ScreenerMode.GT45) {
-                            fw.write("," + numObj(r.lastK) + "," + (r.runDays == null ? "" : r.runDays));
-                        } else if (mode == ScreenerMode.LT20) {
-                            fw.write("," + numObj(r.lastK));
-                        } else if (mode == ScreenerMode.MODE_1234) {
-                            fw.write("," + csv(r.m1234LimitUpRule)
-                                    + "," + intObj(r.m1234LimitUp20d)
-                                    + "," + intObj(r.m1234GapUp20d)
-                                    + "," + intObj(r.m1234VolRunMax20d)
-                                    + "," + intObj(r.m1234UpRunMax20d)
-                            );
+                        if (mode == ScreenerMode.MODE_1234) {
+                            // 1234 模式的欄位順序與 header 對齊
+                            fw.write(csv(r.ticker) + "," + csv(r.name) + "," + csv(r.industry) + ","
+                                    + csv(r.m1234LimitUpRule) + ","
+                                    + intObj(r.m1234LimitUp20d) + ","
+                                    + intObj(r.m1234GapUp20d) + ","
+                                    + intObj(r.m1234VolRunMax20d) + ","
+                                    + intObj(r.m1234UpRunMax20d) + ","
+                                    + num(r.latestClose));
+                        } else {
+                            fw.write(csv(r.ticker) + "," + csv(r.name) + "," + csv(r.industry) + ","
+                                    + num(r.avgClose60) + "," + num(r.latestClose));
+
+                            if (mode == ScreenerMode.MA60_3PCT) {
+                                fw.write("," + numObj(r.ma60) + "," + numObj(r.ma60DiffPct));
+                            } else if (mode == ScreenerMode.GT45) {
+                                fw.write("," + numObj(r.lastK) + "," + (r.runDays == null ? "" : r.runDays));
+                            } else if (mode == ScreenerMode.LT20) {
+                                fw.write("," + numObj(r.lastK));
+                            } else if (mode == ScreenerMode.KD_GC_RECENT) {
+                                // 你原本 header 有 CrossDate/LastK/LastD，但舊版沒寫出來，這裡順便補齊
+                                fw.write("," + csv(r.crossDate) + "," + numObj(r.lastK) + "," + numObj(r.lastD));
+                            }
                         }
+
                         fw.write("\n");
                     }
                 }
             }
+
             return out;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            android.util.Log.e("ScreenerSvc", "exportResultsToCsv failed: " + e.getMessage(), e);
             return null;
         }
     }

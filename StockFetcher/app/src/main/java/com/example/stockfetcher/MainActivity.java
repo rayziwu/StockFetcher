@@ -1694,31 +1694,48 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                 })
                 .show();
     }
+    private static String stripBom(String s) {
+        if (s == null) return null;
+        return s.replace("\uFEFF", "");
+    }
+
+    private static String unquote(String s) {
+        if (s == null) return null;
+        s = s.trim();
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
+            return s.substring(1, s.length() - 1).trim();
+        }
+        return s;
+    }
+
     private List<String> readFirstColumnTickersFromCsv(java.io.File file) {
         List<String> out = new ArrayList<>();
         java.util.HashSet<String> seen = new java.util.HashSet<>();
 
         try (java.io.BufferedReader br = new java.io.BufferedReader(
-                new java.io.InputStreamReader(new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+                new java.io.InputStreamReader(
+                        new java.io.FileInputStream(file),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
 
             String line;
             while ((line = br.readLine()) != null) {
-                line = line.trim();
+                line = stripBom(line).trim();
                 if (line.isEmpty()) continue;
 
-                // 只取第一欄（簡易 CSV：逗號前）
+                // 只取第一欄
                 String col0 = line.split(",", -1)[0].trim();
+                col0 = unquote(stripBom(col0)).trim();
 
-                // 跳過 header
-                if (col0.equalsIgnoreCase("ticker")) continue;
+                // 跳過 header（你的 Python 欄名是 "Ticker"）
+                if (col0.equalsIgnoreCase("ticker") || col0.equalsIgnoreCase("symbol")) continue;
 
-                // 正規化
-                String t = col0.toUpperCase(Locale.US);
+                String t = col0.toUpperCase(Locale.US).trim();
                 if (t.isEmpty()) continue;
+
                 if (seen.add(t)) out.add(t);
             }
         } catch (Exception e) {
-            Log.e(TAG, "CSV read failed: " + e.getMessage());
+            Log.e(TAG, "CSV read failed: " + e.getMessage(), e);
         }
         return out;
     }
