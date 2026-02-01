@@ -103,6 +103,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private String activeMacdDivSide = "底";
     private String p1234LimitUpRule = "1";      // "0" / "1" / ">1"（預設 1 次）
     private String active1234LimitUpRule = "1";
+    private int p1234GapMin = 2;      // 跳空至少幾次（1或2），預設2
+    private int active1234GapMin = 2;
 
     private int screenerIndex = 0;
     private boolean screenerSessionClosed = true;
@@ -1855,6 +1857,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         activeKdGcBars = pKdGcBars;
         activeKdGcTf   = pKdGcTf;
         active1234LimitUpRule = p1234LimitUpRule;
+        active1234GapMin = p1234GapMin;
 
         this.screenerMode = mode;
         this.isScreening = true;
@@ -1890,6 +1893,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         it.putExtra(ScreenerForegroundService.EXTRA_KD_GC_TF,   activeKdGcTf);
 
         it.putExtra(ScreenerForegroundService.EXTRA_1234_LIMITUP_RULE, active1234LimitUpRule);
+        it.putExtra(ScreenerForegroundService.EXTRA_1234_GAP_MIN, active1234GapMin);
+
         // ✅ 若使用「從檔案讀取」模式：把 CSV 路徑傳給 Service
         if (pendingTickerCsvPathForScreening != null && !pendingTickerCsvPathForScreening.trim().isEmpty()) {
             it.putExtra(ScreenerForegroundService.EXTRA_TICKER_CSV_PATH, pendingTickerCsvPathForScreening);
@@ -2292,9 +2297,21 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
 
         // ---------- Row 6: 1234 (one line) ----------
-        // ---------- Row 6: 1234 (one line) ----------
         final android.widget.NumberPicker np1234Rule = mkRulePicker.apply(p1234LimitUpRule);
-// ✅ 若你想寬一點（避免字擠），把 mkRulePicker 裡 dp60 改 dp72 即可
+        // ✅ 新增：跳空次數 picker（1~2），預設 2
+        final android.widget.NumberPicker np1234GapMin = new android.widget.NumberPicker(this);
+        np1234GapMin.setMinValue(1);
+        np1234GapMin.setMaxValue(2);
+        np1234GapMin.setWrapSelectorWheel(false);
+        np1234GapMin.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        np1234GapMin.setValue(Math.max(1, Math.min(2, p1234GapMin)));
+
+        android.widget.LinearLayout.LayoutParams lpGap =
+                new android.widget.LinearLayout.LayoutParams(dp44, dp60);
+        lpGap.leftMargin = dp2;
+        lpGap.rightMargin = dp2;
+        np1234GapMin.setLayoutParams(lpGap);
+        np1234GapMin.setMinimumWidth(dp44);
 
         android.widget.LinearLayout row6 = new android.widget.LinearLayout(this);
         row6.setOrientation(android.widget.LinearLayout.HORIZONTAL);
@@ -2302,15 +2319,11 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         row6.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row6.setClickable(true);
 
-        if (isZh) {
-            row6.addView(mkText.apply("1234篩選 最近20日"));
-            row6.addView(np1234Rule);
-            row6.addView(mkText.apply("漲停"));
-        } else {
-            row6.addView(mkText.apply("1234screen Last 20days"));
-            row6.addView(np1234Rule);
-            row6.addView(mkText.apply("limit-up"));
-        }
+        row6.addView(mkText.apply(getString(R.string.screener_mode_1234)+ " "));
+        row6.addView(np1234Rule);
+        row6.addView(mkText.apply(getString(R.string.screener_1234_limitup)));
+        row6.addView(np1234GapMin);
+        row6.addView(mkText.apply(getString(R.string.screener_1234_gapup))); // 新增字串：跳空
 
         // ---------- Row 7: CSV list ----------
         android.widget.TextView row7 = mkText.apply(getString(R.string.screener_mode_csv_list));
@@ -2401,6 +2414,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         row6.setOnClickListener(v -> {
             p1234LimitUpRule = indexToRule.apply(np1234Rule.getValue());
+            p1234GapMin = np1234GapMin.getValue();   // 1或2
             dlg.dismiss();
             ensureTickerFileThenStart(ScreenerMode.MODE_1234);
         });

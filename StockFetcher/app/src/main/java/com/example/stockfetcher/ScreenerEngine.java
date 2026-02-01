@@ -32,6 +32,7 @@ public final class ScreenerEngine {
         public Integer kdGcBars;  // 最近N根，預設2
         public String  kdGcTf;    // 時/日/周/月（或 Hour/Day/Week/Month）
         public String m1234LimitUpRule; // "0"/"1"/">1"
+        public Integer m1234GapMin; // 1 or 2
 
     }
 
@@ -212,8 +213,9 @@ public final class ScreenerEngine {
             }
 
             if (mode == ScreenerMode.MODE_1234) {
+                int gapMin = (ov != null && ov.m1234GapMin != null) ? clampI(ov.m1234GapMin, 1, 2) : 2;
                 String rule = (ov != null && ov.m1234LimitUpRule != null) ? ov.m1234LimitUpRule : "1";
-                ScreenerResult r = eval1234(info, data, rule);
+                ScreenerResult r = eval1234(info, data, rule, gapMin);
                 if (r != null) out.add(r);
                 continue;
             }
@@ -244,7 +246,7 @@ public final class ScreenerEngine {
         out.sort(Comparator.comparingDouble((ScreenerResult r) -> r.avgClose60).reversed());
         return out;
     }
-    private static ScreenerResult eval1234(TickerInfo info, List<StockDayPrice> list, String limitUpRule) {
+    private static ScreenerResult eval1234(TickerInfo info, List<StockDayPrice> list, String limitUpRule, int gapMin) {
         if (list == null || list.size() < 60) return null;
 
         list.sort(java.util.Comparator.comparing(StockDayPrice::getDate));
@@ -316,7 +318,7 @@ public final class ScreenerEngine {
         else if (">1".equals(rule)) c1 = (limitUpCnt >= 2);
         else c1 = (limitUpCnt == 1);
 
-        boolean c2 = (gapUpCnt >= 1);
+        boolean c2 = (gapUpCnt >= gapMin);
         boolean c3 = (volRunMax >= 3);
         boolean c4 = (upRunMax >= 4);
 

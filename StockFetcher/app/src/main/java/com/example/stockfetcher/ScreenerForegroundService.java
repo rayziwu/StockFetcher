@@ -53,6 +53,7 @@ public class ScreenerForegroundService extends Service {
     public static final String EXTRA_MA_TF = "ma_tf";
     public static final String EXTRA_MA_WINDOW = "ma_window";
     public static final String EXTRA_1234_LIMITUP_RULE = "m1234_limitup_rule"; // "0"/"1"/">1"
+    public static final String EXTRA_1234_GAP_MIN = "m1234_gap_min"; // int: 1 or 2
     private static final String CH_ID = "screener_channel";
     private static final int NOTIF_ID = 1001;
     public static final String EXTRA_KD_GC_BARS = "kd_gc_bars";
@@ -128,6 +129,7 @@ public class ScreenerForegroundService extends Service {
             ov.kdGcTf   = getTrimmedStringOrNull(intent, EXTRA_KD_GC_TF);
 
             ov.m1234LimitUpRule = getTrimmedStringOrNull(intent, EXTRA_1234_LIMITUP_RULE);
+            ov.m1234GapMin = getIntOrNull(intent, EXTRA_1234_GAP_MIN);
 
             //Log.d("ScreenerSvc", "mode=" + mode
             //        + " ov.ltThr=" + ov.ltThr + " ov.ltDays=" + ov.ltDays
