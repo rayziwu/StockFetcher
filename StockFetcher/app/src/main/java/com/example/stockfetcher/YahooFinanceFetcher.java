@@ -645,10 +645,11 @@ public class YahooFinanceFetcher {
         intradayWeekCache.put(key, new PeriodSnap(keyDate, o, h, l, c, v));
         return upsertByDateKey(base, keyDate, o, h, l, c, v);
     }
+
+
     // -------------------------
     // intraday 1h: aggregate from Yahoo 1m
     // -------------------------
-
     private List<StockDayPrice> applyYahoo1mAggregateHourBar(List<StockDayPrice> in, String symbolUpper) {
         if (in == null || in.isEmpty()) return in;
 
@@ -666,14 +667,29 @@ public class YahooFinanceFetcher {
             String json = response.body().string();
             mins = parseYahooData(json, "1m", key);
         } catch (Exception e) {
+            // 1m 抓不到：用 cache（若有）覆蓋，且先清掉同小時 HH:xx
             HourSnap snap = intradayHourCache.get(key);
-            if (snap != null) return upsertHour(in, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            if (snap != null) {
+                String hourPrefix = (snap.hourKey != null && snap.hourKey.length() >= 13) ? snap.hourKey.substring(0, 13) : "";
+                List<StockDayPrice> base = hourPrefix.isEmpty()
+                        ? in
+                        : removeSameHourDifferentMinute(in, hourPrefix, snap.hourKey);
+
+                return upsertHour(base, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            }
             return in;
         }
 
         if (mins == null || mins.isEmpty()) {
             HourSnap snap = intradayHourCache.get(key);
-            if (snap != null) return upsertHour(in, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            if (snap != null) {
+                String hourPrefix = (snap.hourKey != null && snap.hourKey.length() >= 13) ? snap.hourKey.substring(0, 13) : "";
+                List<StockDayPrice> base = hourPrefix.isEmpty()
+                        ? in
+                        : removeSameHourDifferentMinute(in, hourPrefix, snap.hourKey);
+
+                return upsertHour(base, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            }
             return in;
         }
 
@@ -683,13 +699,24 @@ public class YahooFinanceFetcher {
             lastTs = LocalDateTime.parse(last, FMT_YMD_HM);
         } catch (Exception e) {
             HourSnap snap = intradayHourCache.get(key);
-            if (snap != null) return upsertHour(in, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            if (snap != null) {
+                String hourPrefix = (snap.hourKey != null && snap.hourKey.length() >= 13) ? snap.hourKey.substring(0, 13) : "";
+                List<StockDayPrice> base = hourPrefix.isEmpty()
+                        ? in
+                        : removeSameHourDifferentMinute(in, hourPrefix, snap.hourKey);
+
+                return upsertHour(base, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            }
             return in;
         }
 
+        // ✅ 本小時整點 key（HH:00）
         LocalDateTime hourStart = lastTs.withMinute(0).withSecond(0).withNano(0);
-        String hourKey = hourStart.format(FMT_YMD_HM); // minute=00
+        String hourKey = hourStart.format(FMT_YMD_HM); // yyyy-MM-dd HH:00
         String hourPrefix = hourKey.substring(0, 13);  // "yyyy-MM-dd HH"
+
+        // ✅ 先清掉同小時 HH:xx（例如 13:30 / 10:37），避免多一根
+        List<StockDayPrice> base = removeSameHourDifferentMinute(in, hourPrefix, hourKey);
 
         boolean any = false;
         double o = Double.NaN, h = Double.NaN, l = Double.NaN, c = Double.NaN;
@@ -715,8 +742,11 @@ public class YahooFinanceFetcher {
         }
 
         if (!any || !Double.isFinite(c)) {
+            // 聚合失敗：用 cache（若有）覆蓋，且用 base（已清掉 HH:xx）
             HourSnap snap = intradayHourCache.get(key);
-            if (snap != null) return upsertHour(in, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            if (snap != null) {
+                return upsertHour(base, snap.hourKey, snap.o, snap.h, snap.l, snap.c, snap.vShares);
+            }
             return in;
         }
 
@@ -725,9 +755,24 @@ public class YahooFinanceFetcher {
         if (!Double.isFinite(l)) l = Math.min(o, c);
 
         intradayHourCache.put(key, new HourSnap(hourKey, o, h, l, c, vSum));
-        return upsertHour(in, hourKey, o, h, l, c, vSum);
+
+        // ✅ 用 base 覆蓋/新增 hourKey（HH:00）
+        return upsertHour(base, hourKey, o, h, l, c, vSum);
     }
 
+    private static List<StockDayPrice> removeSameHourDifferentMinute(List<StockDayPrice> in, String hourPrefix, String keepKey) {
+        ArrayList<StockDayPrice> out = new ArrayList<>(in.size());
+        for (StockDayPrice p : in) {
+            if (p == null) continue;
+            String ds = p.getDate();
+            if (ds != null && ds.length() >= 13 && ds.startsWith(hourPrefix) && !keepKey.equals(ds)) {
+                // 同一小時但不是 HH:00 的那根（例如 13:30 / 10:37）-> 移除
+                continue;
+            }
+            out.add(p);
+        }
+        return out;
+    }
     private static List<StockDayPrice> upsertHour(List<StockDayPrice> in, String hourKey,
                                                   double o, double h, double l, double c, double vShares) {
         ArrayList<StockDayPrice> out = new ArrayList<>(in.size() + 1);
