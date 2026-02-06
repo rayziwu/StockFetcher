@@ -1739,20 +1739,20 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
         return out;
     }
-    private String buildMainStockLegendLabel() {
+    private String buildMainStockLegendLabel(List<StockDayPrice> displayedList) {
         String t = (currentStockId == null) ? "" : currentStockId.trim().toUpperCase(Locale.US);
         if (t.isEmpty()) return "||";
 
         // 1) 先看記憶體快取
         TickerInfo info = tickerMetaMap.get(t);
 
-        // 2) 沒有就嘗試從內部檔案 /data/data/.../files/股票代碼.csv 讀一次（不觸發網路）
+        // 2) 沒有就嘗試從內部 cache 讀一次（不觸發網路）
         if (info == null) {
             info = findTickerInfoFromInternalCache(t);
             if (info != null) tickerMetaMap.put(t, info);
         }
 
-        // 3) 還找不到就用 screenerResults 當 fallback（若該 ticker 剛好來自篩選結果）
+        // 3) 還找不到就用 screenerResults 當 fallback
         String name = "";
         String ind = "";
         if (info != null) {
@@ -1769,7 +1769,110 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         }
 
-        return t + "|" + name + "|" + ind;
+        // ---- 價格/漲跌：用 displayedList 最後一根 close（盤中已被 MIS 覆蓋）----
+        double price = Double.NaN;
+        double prevClose = Double.NaN;
+
+        if (displayedList != null && !displayedList.isEmpty()) {
+            int n = displayedList.size();
+            StockDayPrice last = displayedList.get(n - 1);
+            if (last != null) price = last.getClose();
+
+            // ✅ 改成「昨收」：上一個不同日期的最後 close
+            prevClose = findPrevDayClose(displayedList);
+        }
+
+        double chg = (Double.isFinite(price) && Double.isFinite(prevClose)) ? (price - prevClose) : Double.NaN;
+        double pct = (Double.isFinite(chg) && Double.isFinite(prevClose) && prevClose != 0.0)
+                ? (chg / prevClose * 100.0)
+                : Double.NaN;
+
+        String tri;
+        if (!Double.isFinite(chg) || chg == 0.0) tri = "—";
+        else if (chg > 0) tri = "▲";
+        else tri = "▼";
+
+        String title = !name.isEmpty() ? name : t; // ✅ 沒名稱就顯示代號
+
+        String priceText = fmtPrice(price);
+        String chgText   = fmtSigned(chg);
+        String pctText   = Double.isFinite(pct) ? (fmtSigned(pct) + "%") : "--%";
+
+        // 股票名稱 價格 (三角形)漲跌 漲跌% |產業
+        StringBuilder sb = new StringBuilder();
+        sb.append(title).append(" ");
+        sb.append(priceText).append(" ");
+        sb.append(tri).append(" ");
+        sb.append(chgText).append(" ");
+        sb.append(pctText);
+
+        if (ind != null && !ind.trim().isEmpty()) {
+            sb.append(" |").append(ind.trim());
+        }
+
+        return sb.toString();
+    }
+
+    /** legend 方塊顏色：漲紅、跌綠、平白 */
+    private int getMainStockUpDownColor(List<StockDayPrice> displayedList) {
+        if (displayedList == null || displayedList.isEmpty()) return Color.WHITE;
+
+        StockDayPrice last = displayedList.get(displayedList.size() - 1);
+        if (last == null) return Color.WHITE;
+
+        double price = last.getClose();                // 盤中已被 MIS 覆蓋成成交價；否則收盤價
+        double prevClose = findPrevDayClose(displayedList); // ✅ 昨收（上一個交易日的最後 close）
+
+        if (!Double.isFinite(price) || !Double.isFinite(prevClose)) return Color.WHITE;
+
+        double chg = price - prevClose;
+        if (chg > 0) return Color.RED;
+        if (chg < 0) return Color.GREEN;
+        return Color.WHITE;
+    }
+    private static String ymdOf(StockDayPrice p) {
+        if (p == null || p.getDate() == null) return "";
+        String s = p.getDate().trim();
+        return (s.length() >= 10) ? s.substring(0, 10) : s;
+    }
+
+    /** 找「上一個交易日的收盤價」：往回找第一個日期不同的最後 close */
+    private static double findPrevDayClose(List<StockDayPrice> list) {
+        if (list == null || list.size() < 2) return Double.NaN;
+
+        int n = list.size();
+        String ymdLast = ymdOf(list.get(n - 1));
+        if (ymdLast.isEmpty()) return Double.NaN;
+
+        for (int i = n - 2; i >= 0; i--) {
+            StockDayPrice p = list.get(i);
+            if (p == null) continue;
+
+            String ymd = ymdOf(p);
+            if (ymd.isEmpty()) continue;
+
+            // 找到上一個不同日期的最後一根 close
+            if (!ymd.equals(ymdLast) && Double.isFinite(p.getClose())) {
+                return p.getClose();
+            }
+        }
+        return Double.NaN;
+    }
+
+    // ---- formatting helpers ----
+    private static String fmtPrice(double v) {
+        if (!Double.isFinite(v)) return "--";
+        double av = Math.abs(v);
+        // 你原本 marker 的習慣：>=100 顯示整數，否則兩位
+        if (av >= 100.0) return String.format(Locale.US, "%.0f", v);
+        return String.format(Locale.US, "%.2f", v);
+    }
+
+    private static String fmtSigned(double v) {
+        if (!Double.isFinite(v)) return "--";
+        double av = Math.abs(v);
+        if (av >= 100.0) return String.format(Locale.US, "%+.0f", v);
+        return String.format(Locale.US, "%+.2f", v);
     }
 
     @androidx.annotation.Nullable
@@ -4820,9 +4923,9 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
                     stockColor = data.getCandleData().getDataSetByIndex(0).getIncreasingColor();
                 } catch (Exception ignored) {}
             }
-
+            stockColor = getMainStockUpDownColor(displayedList);
             customEntries.add(new LegendEntry(
-                    buildMainStockLegendLabel(),
+                    buildMainStockLegendLabel(displayedList),
                     Legend.LegendForm.SQUARE, 10f, 5f, null,
                     stockColor
             ));
