@@ -131,6 +131,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private static final float GAP_LABEL_SHOW_SCALE = 1.02f;
 
     private YahooFinanceFetcher yahooFinanceFetcher;
+    private androidx.appcompat.widget.AppCompatTextView tvMainLegendQuote;
 
     private Button intervalSwitchButton;
     private EditText stockIdEditText, startDateEditText, comparisonStockIdEditText;
@@ -1089,6 +1090,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void initUi() {
         yahooFinanceFetcher = new YahooFinanceFetcher();
         vpView.bindMainChart(mainChart);
+        setupMainLegendQuoteView();
 
         displayText = getResources().getStringArray(R.array.interval_display_text);
         intervalSwitchButton.setText(displayText[currentIntervalIndex]);
@@ -1741,76 +1743,29 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     }
     private String buildMainStockLegendLabel(List<StockDayPrice> displayedList) {
         String t = (currentStockId == null) ? "" : currentStockId.trim().toUpperCase(Locale.US);
-        if (t.isEmpty()) return "||";
+        if (t.isEmpty()) return "";
 
-        // 1) 先看記憶體快取
         TickerInfo info = tickerMetaMap.get(t);
-
-        // 2) 沒有就嘗試從內部 cache 讀一次（不觸發網路）
         if (info == null) {
             info = findTickerInfoFromInternalCache(t);
             if (info != null) tickerMetaMap.put(t, info);
         }
 
-        // 3) 還找不到就用 screenerResults 當 fallback
         String name = "";
-        String ind = "";
         if (info != null) {
             name = (info.name == null) ? "" : info.name.trim();
-            ind  = (info.industry == null) ? "" : info.industry.trim();
         } else {
+            // fallback：從 screenerResults 找
             for (ScreenerResult r : screenerResults) {
                 if (r == null || r.ticker == null) continue;
                 if (t.equals(r.ticker.trim().toUpperCase(Locale.US))) {
                     name = (r.name == null) ? "" : r.name.trim();
-                    ind  = (r.industry == null) ? "" : r.industry.trim();
                     break;
                 }
             }
         }
 
-        // ---- 價格/漲跌：用 displayedList 最後一根 close（盤中已被 MIS 覆蓋）----
-        double price = Double.NaN;
-        double prevClose = Double.NaN;
-
-        if (displayedList != null && !displayedList.isEmpty()) {
-            int n = displayedList.size();
-            StockDayPrice last = displayedList.get(n - 1);
-            if (last != null) price = last.getClose();
-
-            // ✅ 改成「昨收」：上一個不同日期的最後 close
-            prevClose = findPrevDayClose(displayedList);
-        }
-
-        double chg = (Double.isFinite(price) && Double.isFinite(prevClose)) ? (price - prevClose) : Double.NaN;
-        double pct = (Double.isFinite(chg) && Double.isFinite(prevClose) && prevClose != 0.0)
-                ? (chg / prevClose * 100.0)
-                : Double.NaN;
-
-        String tri;
-        if (!Double.isFinite(chg) || chg == 0.0) tri = "—";
-        else if (chg > 0) tri = "▲";
-        else tri = "▼";
-
-        String title = !name.isEmpty() ? name : t; // ✅ 沒名稱就顯示代號
-
-        String priceText = fmtPrice(price);
-        String chgText   = fmtSigned(chg);
-        String pctText   = Double.isFinite(pct) ? (fmtSigned(pct) + "%") : "--%";
-
-        // 股票名稱 價格 (三角形)漲跌 漲跌% |產業
-        StringBuilder sb = new StringBuilder();
-        sb.append(title).append(" ");
-        sb.append(priceText).append(" ");
-        sb.append(tri).append(" ");
-        sb.append(chgText).append(" ");
-        sb.append(pctText);
-
-        if (ind != null && !ind.trim().isEmpty()) {
-            sb.append(" |").append(ind.trim());
-        }
-
-        return sb.toString();
+        return !name.isEmpty() ? name : t;
     }
 
     /** legend 方塊顏色：漲紅、跌綠、平白 */
@@ -1857,6 +1812,90 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
             }
         }
         return Double.NaN;
+    }
+
+    private void updateMainLegendQuote(List<StockDayPrice> displayedList) {
+        if (tvMainLegendQuote == null) return;
+
+        // title（股票名稱/代號）
+        String title = buildMainStockLegendLabel(displayedList);
+        if (title == null || title.trim().isEmpty()) {
+            title = (currentStockId == null) ? "" : currentStockId.trim().toUpperCase(Locale.US);
+        }
+
+        double price = Double.NaN;
+        if (displayedList != null && !displayedList.isEmpty()) {
+            StockDayPrice last = displayedList.get(displayedList.size() - 1);
+            if (last != null) price = last.getClose(); // MIS盤中成交價或收盤價
+        }
+
+        double prevClose = findPrevDayClose(displayedList);
+        if (!Double.isFinite(prevClose) && fullPriceList != null) {
+            prevClose = findPrevDayClose(fullPriceList); // fallback（避免顯示資料太短找不到昨收）
+        }
+
+        if (!Double.isFinite(price) || !Double.isFinite(prevClose) || prevClose == 0.0) {
+            tvMainLegendQuote.setText(title + " --");
+            tvMainLegendQuote.setTextColor(Color.WHITE);
+            return;
+        }
+
+        double chg = price - prevClose;
+        double pct = chg / prevClose * 100.0;
+
+        String tri = (chg > 0) ? "▲" : (chg < 0 ? "▼" : "—");
+        int color = (chg > 0) ? Color.RED : (chg < 0 ? Color.GREEN : Color.WHITE);
+
+        String sPrice = fmtPrice(price);
+        String sChg   = fmtSigned(chg);
+        String sPct   = fmtSigned(pct) + "%";
+
+        // 內容：價格 (三角形)漲跌 漲跌%（你要的格式）
+        String text = sPrice + " " + tri + " " + sChg + " " + sPct;
+
+        // 若你其實也想前面帶股票名稱，就用 title + " " + text
+        // 你這次說「內容: 價格...」，所以只放 text；要含名稱可改下一行
+        // String full = title + " " + text;
+
+        android.text.SpannableStringBuilder ssb = new android.text.SpannableStringBuilder(text);
+        ssb.setSpan(new android.text.style.ForegroundColorSpan(color),
+                0, ssb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+        tvMainLegendQuote.setText(ssb);
+    }
+    private void setupMainLegendQuoteView() {
+        if (mainChart == null) return;
+        if (tvMainLegendQuote != null) return;
+
+        ViewGroup parent = (ViewGroup) mainChart.getParent();
+        if (parent == null) return;
+
+        tvMainLegendQuote = new androidx.appcompat.widget.AppCompatTextView(this);
+        tvMainLegendQuote.setSingleLine(true);
+        tvMainLegendQuote.setTextSize(12f);
+        tvMainLegendQuote.setTextColor(Color.WHITE);
+        tvMainLegendQuote.setClickable(false);
+        tvMainLegendQuote.setFocusable(false);
+
+        int padH = Math.round(6f * getResources().getDisplayMetrics().density);
+        int padV = Math.round(2f * getResources().getDisplayMetrics().density);
+        tvMainLegendQuote.setPadding(padH, padV, padH, padV);
+
+        // 位置：圖表上方、水平置中（你說的大約 x 中間）
+        if (parent instanceof FrameLayout) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            lp.gravity = Gravity.TOP | Gravity.RIGHT;
+            lp.topMargin = Math.round(0f * getResources().getDisplayMetrics().density);
+            tvMainLegendQuote.setLayoutParams(lp);
+            parent.addView(tvMainLegendQuote);
+        } else {
+            // 如果 mainChart 的 parent 不是 FrameLayout，建議把 mainChart 外層改成 FrameLayout
+            // 這裡先用一般 addView，位置可能不如預期（可再調整）
+            parent.addView(tvMainLegendQuote);
+        }
     }
 
     // ---- formatting helpers ----
@@ -3921,6 +3960,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         }
 
         drawMainChartData(displayedList);
+        updateMainLegendQuote(displayedList);
         // ✅ 每次主圖畫完後更新愛心 ♥/♡
         updateFavoriteButtonState();
         updateGapLabelVisibility();
@@ -4575,6 +4615,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
 
         // 主圖
         drawMainChartData(displayedList);
+        updateMainLegendQuote(displayedList);
         updateFavoriteButtonState();
         lastDisplayedListForMain = displayedList;
 
