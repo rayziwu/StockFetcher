@@ -1877,7 +1877,7 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         tvMainLegendQuote.setClickable(false);
         tvMainLegendQuote.setFocusable(false);
 
-        int padH = Math.round(6f * getResources().getDisplayMetrics().density);
+        int padH = Math.round(0f * getResources().getDisplayMetrics().density);
         int padV = Math.round(2f * getResources().getDisplayMetrics().density);
         tvMainLegendQuote.setPadding(padH, padV, padH, padV);
 
@@ -3778,8 +3778,8 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
         legend.setHorizontalAlignment(Legend.LegendHorizontalAlignment.LEFT);
         legend.setOrientation(Legend.LegendOrientation.HORIZONTAL);
         legend.setDrawInside(true);
-        legend.setXOffset(20f);
-        legend.setYOffset(5f);
+        legend.setXOffset(2f);
+        legend.setYOffset(3f);
         scaleLegendTextSizeBy(legend, 1.4f);
 
         mainChart.setDrawOrder(new CombinedChart.DrawOrder[]{
