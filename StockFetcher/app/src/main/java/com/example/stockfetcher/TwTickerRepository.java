@@ -33,7 +33,7 @@ public final class TwTickerRepository {
 
     // 對齊 Python：BASE_URL = "https://isin.twse.com.tw/isin/C_public.jsp"
     private static final String BASE_URL = "https://isin.twse.com.tw/isin/C_public.jsp";
-    private static final String CACHE_FILE = "股票代碼.csv"; // 存內部 filesDir
+    private static final String CACHE_FILE = "股票代碼.csv"; //  externalFilesDir
 
     // 對齊 Python UA
     private static final String UA =
@@ -49,17 +49,57 @@ public final class TwTickerRepository {
         if (t != null) Log.w(TAG, msg, t); else Log.w(TAG, msg);
     }
 
+    // -------- memory cache (avoid reading 股票代碼.csv twice in same process) --------
+    private static final Object MEM_CACHE_LOCK = new Object();
+    @androidx.annotation.Nullable
+    private static volatile List<TickerInfo> memCache = null;
+    private static volatile long memCacheMtime = -1L;
+    @androidx.annotation.Nullable
+    private static volatile String memCachePath = null;
+
+    @androidx.annotation.Nullable
+    private static List<TickerInfo> tryGetMemCache(Context ctx) {
+        List<TickerInfo> c = memCache;
+        if (c == null || c.isEmpty()) return null;
+
+        File f = getCacheFile(ctx); // externalFilesDir/股票代碼.csv
+        if (f != null && f.exists()) {
+            long m = f.lastModified();
+            String p = f.getAbsolutePath();
+            if (p.equals(memCachePath) && m == memCacheMtime) {
+                return c;
+            }
+            // file changed -> invalidate
+            return null;
+        }
+
+        // file missing but we already have data in memory -> still usable
+        return c;
+    }
+
+    private static void updateMemCache(Context ctx, List<TickerInfo> list) {
+        if (list == null) return;
+        File f = getCacheFile(ctx);
+        String p = (f == null) ? null : f.getAbsolutePath();
+        long m = (f != null && f.exists()) ? f.lastModified() : -1L;
+
+        // 用 unmodifiable 避免外部誤改
+        List<TickerInfo> snap = java.util.Collections.unmodifiableList(new ArrayList<>(list));
+
+        memCache = snap;
+        memCachePath = p;
+        memCacheMtime = m;
+    }
+
     private TwTickerRepository() {}
     // 從股票清單 cache 讀到的 meta（ticker -> info）
     public interface ScrapeProgressListener {
         void onLine(String msg);
     }
 
-    public static final String CACHE_NAME = "股票代碼.csv";
-
     public static File getCacheFile(Context ctx) {
         File dir = ctx.getExternalFilesDir(null);
-        return (dir == null) ? null : new File(dir, CACHE_NAME);
+        return (dir == null) ? null : new File(dir, CACHE_FILE);
     }
     /** 對齊 Python：先讀檔；失敗才爬取；成功後寫回 CSV（含 Name/Industry） */
     public static List<TickerInfo> loadOrScrape(Context ctx) {
@@ -67,10 +107,16 @@ public final class TwTickerRepository {
     }
     public static List<TickerInfo> loadOrScrape(Context ctx, @androidx.annotation.Nullable ScrapeProgressListener cb) {
         lastError = "";
+        // ✅ 0) 先用記憶體快取（同一 process 第二次呼叫直接回傳，不讀檔）
+        List<TickerInfo> mem = tryGetMemCache(ctx);
+        if (mem != null && !mem.isEmpty()) return mem;
 
         // 1) 先讀 cache
         List<TickerInfo> cached = readCache(ctx);
-        if (cached != null && !cached.isEmpty()) return cached;
+        if (cached != null && !cached.isEmpty()) {
+            updateMemCache(ctx, cached);
+            return cached;
+        };
 
         // 2) 沒 cache -> 顯示你指定的訊息
         if (cb != null) cb.onLine(ctx.getString(R.string.ticker_scrape_file_missing));
@@ -215,6 +261,7 @@ public final class TwTickerRepository {
                     }
                 }
             }
+            updateMemCache(ctx, list);
         } catch (Exception e) {
             setErr("writeCache failed: " + e.getMessage(), e);
         }
