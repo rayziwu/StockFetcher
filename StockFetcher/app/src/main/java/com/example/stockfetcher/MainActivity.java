@@ -3652,53 +3652,55 @@ public class MainActivity extends AppCompatActivity implements OnChartGestureLis
     private void fetchMainAndComparisonData(String mainSymbol, String interval,
                                             String comparisonSymbol, long startTimeLimit) {
 
-        //Log.d(TAG, String.format(Locale.US, "開始請求主股 %s 和對比指數 %s，間隔 %s。",
-        //        mainSymbol, comparisonSymbol, interval));
-
-        //showToastTop(
-        //        getString(R.string.toast_loading, mainSymbol, comparisonSymbol, displayText[currentIntervalIndex]),
-        //        Toast.LENGTH_SHORT);
-
         final AtomicInteger fetchCount = new AtomicInteger(0);
         final List<String> errorMessages = Collections.synchronizedList(new ArrayList<>());
 
-        yahooFinanceFetcher.fetchStockDataAsync(mainSymbol, interval, startTimeLimit, true, new YahooFinanceFetcher.DataFetchListener() {
-            @Override
-            public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
-                if (!data.isEmpty()) {
-                    Log.d(TAG, String.format(Locale.US,
-                            "DOWNLOAD SUCCESS: Symbol: %s, FULL Data Start Date: %s, Size: %d",
-                            fetchedSymbol, data.get(0).getDate(), data.size()));
-                }
-                fullPriceList = data;
-                onFetchComplete(mainSymbol, null, fetchCount, errorMessages);
-            }
+        // ✅ 主股票：套用 YahooTW優先 + MIS/yfinance fallback（只對 .TW/.TWO 且 1d/1h 生效）
+        yahooFinanceFetcher.fetchStockDataAsync(
+                mainSymbol, interval, startTimeLimit, true,
+                new YahooFinanceFetcher.DataFetchListener() {
+                    @Override
+                    public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
+                        if (!data.isEmpty()) {
+                            Log.d(TAG, String.format(Locale.US,
+                                    "DOWNLOAD SUCCESS: Symbol: %s, FULL Data Start Date: %s, Size: %d",
+                                    fetchedSymbol, data.get(0).getDate(), data.size()));
+                        }
+                        fullPriceList = data;
 
-            @Override
-            public void onError(String errorMessage) {
-                errorMessages.add(getString(R.string.error_load_failed, mainSymbol, errorMessage));
-                onFetchComplete(mainSymbol, errorMessage, fetchCount, errorMessages);
-            }
-        });
+                        // ✅ 用 fetchedSymbol（避免 mainSymbol 未帶尾碼但實際抓到的是 2330.TW）
+                        onFetchComplete(fetchedSymbol, null, fetchCount, errorMessages);
+                    }
 
-        yahooFinanceFetcher.fetchStockDataAsync(comparisonSymbol, interval, startTimeLimit, false, new YahooFinanceFetcher.DataFetchListener() {
-            @Override
-            public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
-                if (!data.isEmpty()) {
-                    Log.d(TAG, String.format(Locale.US,
-                            "DOWNLOAD SUCCESS: Symbol: %s, FULL Data Start Date: %s, Size: %d",
-                            fetchedSymbol, data.get(0).getDate(), data.size()));
-                }
-                comparisonPriceList = data;
-                onFetchComplete(comparisonSymbol, null, fetchCount, errorMessages);
-            }
+                    @Override
+                    public void onError(String errorMessage) {
+                        errorMessages.add(getString(R.string.error_load_failed, mainSymbol, errorMessage));
+                        onFetchComplete(mainSymbol, errorMessage, fetchCount, errorMessages);
+                    }
+                });
 
-            @Override
-            public void onError(String errorMessage) {
-                errorMessages.add(getString(R.string.error_load_failed, comparisonSymbol, errorMessage));
-                onFetchComplete(comparisonSymbol, errorMessage, fetchCount, errorMessages);
-            }
-        });
+        // ✅ 比較：不要套用盤中 patch，避免影響對比資料一致性
+        yahooFinanceFetcher.fetchStockDataAsync(
+                comparisonSymbol, interval, startTimeLimit, false,
+                new YahooFinanceFetcher.DataFetchListener() {
+                    @Override
+                    public void onDataFetched(List<StockDayPrice> data, String fetchedSymbol) {
+                        if (!data.isEmpty()) {
+                            Log.d(TAG, String.format(Locale.US,
+                                    "DOWNLOAD SUCCESS: Symbol: %s, FULL Data Start Date: %s, Size: %d",
+                                    fetchedSymbol, data.get(0).getDate(), data.size()));
+                        }
+                        comparisonPriceList = data;
+
+                        onFetchComplete(fetchedSymbol, null, fetchCount, errorMessages);
+                    }
+
+                    @Override
+                    public void onError(String errorMessage) {
+                        errorMessages.add(getString(R.string.error_load_failed, comparisonSymbol, errorMessage));
+                        onFetchComplete(comparisonSymbol, errorMessage, fetchCount, errorMessages);
+                    }
+                });
     }
 
     private synchronized void onFetchComplete(String symbol, String error,

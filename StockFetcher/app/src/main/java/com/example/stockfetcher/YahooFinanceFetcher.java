@@ -48,6 +48,24 @@ public class YahooFinanceFetcher {
     private static final DateTimeFormatter FMT_YMD = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter FMT_YMD_HM = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
+    // Yahoo TW td-stock tick API
+    private static final String YTW_TICK_BASE_FMT =
+            "https://tw.stock.yahoo.com/_td-stock/api/resource/" +
+                    "FinanceChartService.ApacLibraCharts;symbols=%%5B%%22%s%%22%%5D;type=tick";
+
+    // YahooTW tick 的 volume 是「張」→ 內部一律轉成股數
+    private static final double TW_LOT_SIZE_SHARES = 1000.0;
+
+    private static final String YTW_REFERER = "https://tw.stock.yahoo.com/";
+
+    private static final class ApplyRes {
+        final List<StockDayPrice> list;
+        final boolean applied;
+        ApplyRes(List<StockDayPrice> list, boolean applied) {
+            this.list = list;
+            this.applied = applied;
+        }
+    }
     // ---- intraday caches (avoid flicker) ----
     private static final class DailySnap {
         final String dateYmd;   // yyyy-MM-dd (TW)
@@ -191,12 +209,24 @@ public class YahooFinanceFetcher {
                 // ✅ apply intraday merge BEFORE indicators
                 if (applyTwIntraday && isTwSymbol(processedSymbol)) {
                     if ("1d".equals(interval)) {
-                        result = applyTwseMisDailyBar(result, processedSymbol);
+                        ApplyRes ar = applyYahooTwDailyBarPrefer(result, processedSymbol);
+                        result = ar.list;
+                        if (!ar.applied) {
+                            // fallback：完全沿用你原本 MIS（含 cache）
+                            result = applyTwseMisDailyBar(result, processedSymbol);
+                        }
                     } else if ("1h".equals(interval)) {
-                        result = applyYahoo1mAggregateHourBar(result, processedSymbol);
+                        ApplyRes ar = applyYahooTwHourBarPrefer(result, processedSymbol);
+                        result = ar.list;
+                        if (!ar.applied) {
+                            // fallback：完全沿用你原本 Yahoo chart 1m 聚合（含 cache）
+                            result = applyYahoo1mAggregateHourBar(result, processedSymbol);
+                        }
                     } else if ("1wk".equals(interval)) {
+                        // 先不動：維持你目前的週聚合（daily+MIS）
                         result = applyYahoo1dAggregateWeekBar(result, processedSymbol);
                     } else if ("1mo".equals(interval)) {
+                        // 先不動：維持你目前的月聚合（daily+MIS）
                         result = applyYahoo1dAggregateMonthBar(result, processedSymbol);
                     }
                     Collections.sort(result, Comparator.comparing(StockDayPrice::getDate));
@@ -793,6 +823,270 @@ public class YahooFinanceFetcher {
         return out;
     }
 
+    private ApplyRes applyYahooTwHourBarPrefer(List<StockDayPrice> in, String symbolUpper) {
+        if (in == null || in.isEmpty()) return new ApplyRes(in, false);
+
+        final String key = (symbolUpper == null) ? "" : symbolUpper.trim().toUpperCase(Locale.US);
+        if (key.isEmpty()) return new ApplyRes(in, false);
+
+        Log.d("YTW", "enter " + key + " interval=1h");
+
+        YahooTwTickChart chart = fetchYahooTwTickChart(key);
+        if (chart == null || chart.meta == null || chart.timestamp == null) return new ApplyRes(in, false);
+        if (chart.indicators == null || chart.indicators.quote == null || chart.indicators.quote.isEmpty())
+            return new ApplyRes(in, false);
+
+        YahooTwTickQuote q = chart.indicators.quote.get(0);
+        if (q == null || q.open == null || q.high == null || q.low == null || q.close == null || q.volume == null)
+            return new ApplyRes(in, false);
+
+        ZoneId zone = ZONE_TW;
+        try {
+            if (chart.meta.exchangeTimezoneName != null && !chart.meta.exchangeTimezoneName.trim().isEmpty()) {
+                zone = ZoneId.of(chart.meta.exchangeTimezoneName.trim());
+            }
+        } catch (Exception ignored) {}
+
+        LocalDate today = LocalDate.now(ZONE_TW);
+
+        int n = Math.min(
+                chart.timestamp.length,
+                Math.min(q.open.length,
+                        Math.min(q.high.length,
+                                Math.min(q.low.length,
+                                        Math.min(q.close.length, q.volume.length))))
+        );
+        if (n <= 0) return new ApplyRes(in, false);
+
+        // 找今天最後一筆（決定本小時）
+        LocalDateTime lastTs = null;
+        for (int i = n - 1; i >= 0; i--) {
+            Double cc = q.close[i];
+            if (cc == null) continue;
+
+            LocalDateTime ts = Instant.ofEpochSecond(chart.timestamp[i]).atZone(zone).toLocalDateTime();
+            if (!today.equals(ts.toLocalDate())) continue;
+
+            int hm = ts.getHour() * 60 + ts.getMinute();
+            if (hm < 9 * 60 || hm > 13 * 60 + 30) continue;
+
+            lastTs = ts;
+            break;
+        }
+        if (lastTs == null) return new ApplyRes(in, false);
+
+        LocalDateTime hourStart = lastTs.withMinute(0).withSecond(0).withNano(0);
+        LocalDateTime hourEnd = hourStart.plusHours(1);
+
+        String hourKey = hourStart.format(FMT_YMD_HM); // yyyy-MM-dd HH:00
+        String hourPrefix = hourKey.substring(0, 13);
+
+        boolean any = false;
+        double o = Double.NaN, h = Double.NaN, l = Double.NaN, c = Double.NaN;
+        double vLotsSum = 0.0;
+
+        for (int i = 0; i < n; i++) {
+            Double oo = q.open[i], hh = q.high[i], ll = q.low[i], cc = q.close[i], vv = q.volume[i];
+            if (oo == null || hh == null || ll == null || cc == null || vv == null) continue;
+
+            LocalDateTime ts = Instant.ofEpochSecond(chart.timestamp[i]).atZone(zone).toLocalDateTime();
+            if (ts.isBefore(hourStart) || !ts.isBefore(hourEnd)) continue;
+            if (!today.equals(ts.toLocalDate())) continue;
+
+            int hm = ts.getHour() * 60 + ts.getMinute();
+            if (hm < 9 * 60 || hm > 13 * 60 + 30) continue;
+
+            if (!any) {
+                any = true;
+                o = oo; h = hh; l = ll;
+            } else {
+                h = Math.max(h, hh);
+                l = Math.min(l, ll);
+            }
+            c = cc;
+            vLotsSum += vv;
+        }
+
+        if (!any || !Double.isFinite(c)) return new ApplyRes(in, false);
+
+        if (!Double.isFinite(o)) o = c;
+        if (!Double.isFinite(h)) h = Math.max(o, c);
+        if (!Double.isFinite(l)) l = Math.min(o, c);
+
+        double vShares = vLotsSum * TW_LOT_SIZE_SHARES;
+
+        // ✅ 清掉同小時 HH:xx，避免多一根（保留 HH:00）
+        List<StockDayPrice> base = removeSameHourDifferentMinute(in, hourPrefix, hourKey);
+
+        // ✅ cache key 統一用 key
+        intradayHourCache.put(key, new HourSnap(hourKey, o, h, l, c, vShares));
+
+        List<StockDayPrice> out = upsertHour(base, hourKey, o, h, l, c, vShares);
+
+        Log.d("YTW", "[1h] hit " + key + " hourKey=" + hourKey + " close=" + c + " vLots=" + vLotsSum);
+        return new ApplyRes(out, true);
+    }
+
+    private ApplyRes applyYahooTwDailyBarPrefer(List<StockDayPrice> in, String symbolUpper) {
+        if (in == null || in.isEmpty()) return new ApplyRes(in, false);
+
+        final String key = (symbolUpper == null) ? "" : symbolUpper.trim().toUpperCase(Locale.US);
+        if (key.isEmpty()) return new ApplyRes(in, false);
+
+        Log.d("YTW", "enter " + key + " interval=1d");
+
+        YahooTwTickChart chart = fetchYahooTwTickChart(key);
+        if (chart == null || chart.meta == null || chart.timestamp == null) return new ApplyRes(in, false);
+        if (chart.indicators == null || chart.indicators.quote == null || chart.indicators.quote.isEmpty())
+            return new ApplyRes(in, false);
+
+        YahooTwTickQuote q = chart.indicators.quote.get(0);
+        if (q == null || q.open == null || q.high == null || q.low == null || q.close == null || q.volume == null)
+            return new ApplyRes(in, false);
+
+        ZoneId zone = ZONE_TW;
+        try {
+            if (chart.meta.exchangeTimezoneName != null && !chart.meta.exchangeTimezoneName.trim().isEmpty()) {
+                zone = ZoneId.of(chart.meta.exchangeTimezoneName.trim());
+            }
+        } catch (Exception ignored) {}
+
+        LocalDate today = LocalDate.now(ZONE_TW);
+        String todayYmd = today.format(FMT_YMD);
+
+        // 驗證 regularMarketTime 是今天（避免取到舊資料）
+        if (chart.meta.regularMarketTime == null) return new ApplyRes(in, false);
+        LocalDate lastD = Instant.ofEpochSecond(chart.meta.regularMarketTime).atZone(zone).toLocalDate();
+        if (!today.equals(lastD)) return new ApplyRes(in, false);
+
+        int n = Math.min(
+                chart.timestamp.length,
+                Math.min(q.open.length,
+                        Math.min(q.high.length,
+                                Math.min(q.low.length,
+                                        Math.min(q.close.length, q.volume.length))))
+        );
+        if (n <= 0) return new ApplyRes(in, false);
+
+        boolean any = false;
+        double dayO = Double.NaN, dayH = Double.NaN, dayL = Double.NaN, dayC = Double.NaN;
+        double vLotsSum = 0.0;
+
+        for (int i = 0; i < n; i++) {
+            Double oo = q.open[i], hh = q.high[i], ll = q.low[i], cc = q.close[i], vv = q.volume[i];
+            if (oo == null || hh == null || ll == null || cc == null || vv == null) continue;
+
+            LocalDateTime ts = Instant.ofEpochSecond(chart.timestamp[i]).atZone(zone).toLocalDateTime();
+            if (!today.equals(ts.toLocalDate())) continue;
+
+            // 只取 09:00~13:30（含）
+            int hm = ts.getHour() * 60 + ts.getMinute();
+            if (hm < 9 * 60 || hm > 13 * 60 + 30) continue;
+
+            if (!any) {
+                any = true;
+                dayO = oo;
+                dayH = hh;
+                dayL = ll;
+            } else {
+                dayH = Math.max(dayH, hh);
+                dayL = Math.min(dayL, ll);
+            }
+            dayC = cc;
+            vLotsSum += vv;
+        }
+
+        if (!any || !Double.isFinite(dayC)) return new ApplyRes(in, false);
+
+        // close 優先用 meta last_price
+        if (chart.meta.regularMarketPrice != null && Double.isFinite(chart.meta.regularMarketPrice)) {
+            dayC = chart.meta.regularMarketPrice;
+        }
+
+        if (!Double.isFinite(dayO)) dayO = dayC;
+        if (!Double.isFinite(dayH)) dayH = Math.max(dayO, dayC);
+        if (!Double.isFinite(dayL)) dayL = Math.min(dayO, dayC);
+
+        // Volume：lots -> shares
+        double vShares = vLotsSum * TW_LOT_SIZE_SHARES;
+
+        // ✅ cache key 統一用 key
+        intradayDailyCache.put(key, new DailySnap(todayYmd, dayO, dayH, dayL, dayC, vShares));
+
+        List<StockDayPrice> out = upsertDaily(in, todayYmd, dayO, dayH, dayL, dayC, vShares);
+
+        Log.d("YTW", "[1d] hit " + key + " close=" + dayC + " vLots=" + vLotsSum);
+        return new ApplyRes(out, true);
+    }
+
+    private HttpUrl buildYahooTwTickUrl(String symbolUpper) {
+        String base = String.format(Locale.US, YTW_TICK_BASE_FMT, symbolUpper);
+        HttpUrl u = HttpUrl.parse(base);
+        if (u == null) return null;
+
+        long ms = System.currentTimeMillis();
+
+        return u.newBuilder()
+                .addQueryParameter("bkt", "c1-stock-pc-homepage,tw-stock-desktop-cg-r3")
+                .addQueryParameter("device", "desktop")
+                .addQueryParameter("ecma", "modern")
+                .addQueryParameter("feature", "enableGAMAds,enableGAMEdgeToEdge,enableEvPlayer,useCG,useCGV2")
+                .addQueryParameter("intl", "tw")
+                .addQueryParameter("lang", "zh-Hant-TW")
+                .addQueryParameter("partner", "none")
+                .addQueryParameter("region", "TW")
+                .addQueryParameter("site", "finance")
+                .addQueryParameter("tz", "Asia/Taipei")
+                .addQueryParameter("ver", "1.4.824")
+                .addQueryParameter("returnMeta", "true")
+                .addQueryParameter("_", String.valueOf(ms))
+                .build();
+    }
+
+    private YahooTwTickChart fetchYahooTwTickChart(String symbolUpper) {
+        HttpUrl url = buildYahooTwTickUrl(symbolUpper);
+        if (url == null) return null;
+
+        Log.d("YTW", "tick url=" + url);
+
+        Request req = new Request.Builder()
+                .url(url)
+                .header("User-Agent", ua())
+                .header("Referer", "https://tw.stock.yahoo.com/")
+                .header("Accept", "application/json,text/plain,*/*")
+                .header("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
+                .build();
+
+        try (Response r = client.newCall(req).execute()) {
+            if (r == null || r.body() == null) {
+                Log.w("YTW", "tick null response/body symbol=" + symbolUpper);
+                return null;
+            }
+
+            int code = r.code();
+            String js = r.body().string();
+
+            if (!r.isSuccessful()) {
+                Log.w("YTW", "tick HTTP " + code + " symbol=" + symbolUpper
+                        + " body=" + (js.length() > 200 ? js.substring(0, 200) : js));
+                return null;
+            }
+
+            YahooTwTickResponse resp = new Gson().fromJson(js, YahooTwTickResponse.class);
+            if (resp == null || resp.data == null || resp.data.isEmpty()
+                    || resp.data.get(0) == null || resp.data.get(0).chart == null) {
+                Log.w("YTW", "tick JSON unexpected symbol=" + symbolUpper
+                        + " body=" + (js.length() > 200 ? js.substring(0, 200) : js));
+                return null;
+            }
+
+            return resp.data.get(0).chart;
+
+        } catch (Exception e) {
+            Log.w("YTW", "tick exception symbol=" + symbolUpper + " err=" + e.getMessage(), e);
+            return null;
+        }
+    }
     // -------------------------
     // utils
     // -------------------------
@@ -836,7 +1130,33 @@ public class YahooFinanceFetcher {
             return (cookies != null) ? cookies : java.util.Collections.emptyList();
         }
     }
-
+    private static final class YahooTwTickResponse {
+        List<YahooTwTickItem> data;
+    }
+    private static final class YahooTwTickItem {
+        YahooTwTickChart chart;
+    }
+    private static final class YahooTwTickChart {
+        YahooTwTickMeta meta;
+        long[] timestamp;
+        YahooTwTickIndicators indicators;
+    }
+    private static final class YahooTwTickMeta {
+        String symbol;
+        String exchangeTimezoneName;
+        Double regularMarketPrice;
+        Long regularMarketTime; // epoch sec
+    }
+    private static final class YahooTwTickIndicators {
+        List<YahooTwTickQuote> quote;
+    }
+    private static final class YahooTwTickQuote {
+        Double[] open;
+        Double[] high;
+        Double[] low;
+        Double[] close;
+        Double[] volume; // lots (張)
+    }
     // -------------------------
     // JSON models
     // -------------------------
